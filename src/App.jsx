@@ -289,26 +289,8 @@ function calcularTotais(selecionados) {
 
 function calcularTotaisOperacionais(selecionados, dados = {}) {
   const base = calcularTotais(selecionados);
-  const isContra = dados.tipoDocumento === "Auto de Contraordenação";
-
-  if (isContra) {
-    const analise = analisarHistorialCondutor(selecionados, dados);
-
-    return {
-      ...base,
-      valorCoimaSugerido: analise.existeAgravamento
-        ? analise.coimaSugerida
-        : base.coimaMin,
-      penaSugerida: 0,
-      criterio: analise.existeAgravamento
-        ? `Reincidência/historial relevante identificado.\n${analise.texto}\nFundamento: Art. 41.º do Código da Estrada.`
-        : "Sem reincidência identificada — aplicação pelo mínimo legal.",
-    };
-  }
-
   const agravantes = gerarAgravantesLegais(selecionados, dados);
   const temAgravante = agravantes && !agravantes.includes("[sem agravantes");
-
   return {
     ...base,
     valorCoimaSugerido: temAgravante ? base.coimaMax : base.coimaMin,
