@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabase";
 import {
   Search,
   Plus,
@@ -467,6 +468,7 @@ function criarRelatorio(dados, selecionados, totais) {
 
   const cabecalhoBase = `N.º Processo/Auto: ${dados.numeroProcesso || "[n.º interno]"}
 Agente: ${dados.posto} ${dados.agente}
+NIM: ${dados.nim || "[NIM]"}
 Data/Hora: ${dados.dataHora}
 Suspeito/Autuado: ${dados.suspeito || "[identificação do cidadão]"}
 Local: ${dados.local || "[local da ocorrência]"}
@@ -498,6 +500,7 @@ Pena sugerida: ${years(totaisOperacionais.penaSugerida)}`;
 
 N.º Processo/Auto: ${dados.numeroProcesso || "[n.º interno]"}
 Agente: ${dados.posto} ${dados.agente}
+NIM: ${dados.nim || "[NIM]"}
 Data/Hora: ${dados.dataHora}
 Local: ${dados.local || "[local da ocorrência]"}
 Matrícula/Viatura: ${dados.matricula || "[se aplicável]"}
@@ -540,7 +543,7 @@ Pena sugerida: ${years(totaisOperacionais.penaSugerida)}`;
 
 function criarRelatorioOficial(dados, selecionados, totais) {
   const titulo = obterTipoDocumento(dados);
-  return `════════════════════════════════════\nPOLÍCIA DE SAN ANDREAS — PSA\n${titulo}\n════════════════════════════════════\n\n${criarRelatorio(dados, selecionados, totais)}\n\n════════════════════════════════════\nAssinatura do Agente: ${dados.posto} ${dados.agente}\n════════════════════════════════════`;
+  return `════════════════════════════════════\nPOLÍCIA DE SAN ANDREAS — PSA\n${titulo}\n════════════════════════════════════\n\n${criarRelatorio(dados, selecionados, totais)}\n\n════════════════════════════════════\nAssinatura do Agente: ${dados.posto} ${dados.agente} | NIM: ${dados.nim || "[NIM]"}\n════════════════════════════════════`;
 }
 
 function makeId() {
@@ -566,6 +569,7 @@ function runDevTests() {
   const dadosTeste = {
     agente: "Johny Morcego",
     posto: "Cabo Chefe",
+    nim: "",
     numeroProcesso: "AUTO-001",
     suspeito: "Teste Suspeito",
     local: "Vanilla",
@@ -610,6 +614,42 @@ function aplicarQuebraLinhaTeste(a, b) {
 // Testes desativados em produção.
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mostrarPerfil, setMostrarPerfil] = useState(false);
+  const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "" });
+  const [carregandoPerfil, setCarregandoPerfil] = useState(false);
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) console.error("Erro ao obter sessão:", error);
+      if (mounted) {
+        setUser(data?.session?.user ?? null);
+        setAuthLoading(false);
+      }
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      authListener?.subscription?.unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    carregarPerfil(user);
+  }, [user]);
+
   const [query, setQuery] = useState("");
   const [tipo, setTipo] = useState("Todos");
   const [categoria, setCategoria] = useState("Todas");
@@ -618,6 +658,10 @@ export default function App() {
   const [copiado, setCopiado] = useState("");
   const [modoPatrulha, setModoPatrulha] = useState(false);
   const [contextoRapido, setContextoRapido] = useState("");
+  const [mostrarAutos, setMostrarAutos] = useState(false);
+  const [autosGuardados, setAutosGuardados] = useState([]);
+  const [autoPesquisa, setAutoPesquisa] = useState("");
+  const [carregandoAutos, setCarregandoAutos] = useState(false);
   const [dados, setDados] = useState({
     agente: "Johny Morcego",
     posto: "Cabo Chefe",
@@ -651,6 +695,26 @@ export default function App() {
   const relatorioOficial = useMemo(() => criarRelatorioOficial(dados, selecionados, totais), [dados, selecionados, totais]);
   const sugestoesContexto = useMemo(() => sugerirPorContexto(`${contextoRapido} ${dados.factos}`, selecionados), [contextoRapido, dados.factos, selecionados]);
   const sugestoesRelacionadas = useMemo(() => sugerirRelacionados(selecionados), [selecionados]);
+
+  const autosFiltrados = useMemo(() => {
+    const q = normalize(autoPesquisa);
+    if (!q) return autosGuardados;
+    return autosGuardados.filter((auto) =>
+      normalize(`${auto.id} ${auto.tipo_documento || ""} ${auto.suspeito || ""} ${auto.local || ""} ${auto.observacoes || ""}`).includes(q)
+    );
+  }, [autosGuardados, autoPesquisa]);
+
+  const estatisticasAutos = useMemo(() => {
+    return autosGuardados.reduce(
+      (acc, auto) => ({
+        total: acc.total + 1,
+        coimaMin: acc.coimaMin + (auto.coima_min || 0),
+        coimaMax: acc.coimaMax + (auto.coima_max || 0),
+        penaMin: acc.penaMin + (auto.pena_min || 0),
+      }),
+      { total: 0, coimaMin: 0, coimaMax: 0, penaMin: 0 }
+    );
+  }, [autosGuardados]);
 
   function addArtigo(a) {
     if (!a) return;
@@ -703,6 +767,302 @@ export default function App() {
     window.print();
   }
 
+  async function login() {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setEmail("");
+    setPassword("");
+  }
+
+  async function registar() {
+    if (!email || !password) {
+      alert("Preenche email e password.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    alert("Conta criada. Se o Supabase pedir confirmação, confirma o email antes de entrar.");
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+  }
+
+  async function carregarPerfil(utilizador = user) {
+    if (!utilizador) return;
+    setCarregandoPerfil(true);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,email,nome,cargo,nim")
+      .eq("id", utilizador.id)
+      .maybeSingle();
+
+    setCarregandoPerfil(false);
+
+    if (error) {
+      console.error("Erro ao carregar perfil:", error);
+      return;
+    }
+
+    const perfilAtual = {
+      nome: data?.nome || "",
+      cargo: data?.cargo || "",
+      nim: data?.nim || "",
+    };
+
+    setPerfil(perfilAtual);
+
+    if (perfilAtual.nome || perfilAtual.cargo || perfilAtual.nim) {
+      setDados((atuais) => ({
+        ...atuais,
+        agente: perfilAtual.nome || atuais.agente,
+        posto: perfilAtual.cargo || atuais.posto,
+        nim: perfilAtual.nim || atuais.nim,
+      }));
+    } else {
+      setMostrarPerfil(true);
+    }
+  }
+
+  async function guardarPerfil() {
+    if (!user) return;
+
+    if (!perfil.nome.trim() || !perfil.cargo.trim() || !perfil.nim.trim()) {
+      alert("Preenche Nome, Cargo e NIM.");
+      return;
+    }
+
+    setGuardandoPerfil(true);
+
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({
+        id: user.id,
+        email: user.email,
+        nome: perfil.nome.trim(),
+        cargo: perfil.cargo.trim(),
+        nim: perfil.nim.trim(),
+      });
+
+    setGuardandoPerfil(false);
+
+    if (error) {
+      console.error("Erro ao guardar perfil:", error);
+      alert("Erro ao guardar perfil. Confirma se criaste a policy de INSERT/UPDATE na tabela profiles.");
+      return;
+    }
+
+    setDados((atuais) => ({
+      ...atuais,
+      agente: perfil.nome.trim(),
+      posto: perfil.cargo.trim(),
+      nim: perfil.nim.trim(),
+    }));
+
+    setMostrarPerfil(false);
+    alert("Perfil guardado com sucesso.");
+  }
+
+  async function carregarMeusAutos() {
+    setCarregandoAutos(true);
+
+    const { data, error } = await supabase
+      .from("autos")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    setCarregandoAutos(false);
+
+    if (error) {
+      alert("Erro ao carregar autos.");
+      console.error(error);
+      return;
+    }
+
+    setAutosGuardados(data || []);
+    setMostrarAutos(true);
+  }
+
+  async function guardarAuto() {
+    if (!user) {
+      alert("Tens de iniciar sessão para guardar o auto.");
+      return;
+    }
+
+    if (!dados.suspeito.trim() && !dados.local.trim() && selecionados.length === 0) {
+      const confirmar = confirm("Este auto está praticamente vazio. Queres guardar mesmo assim?");
+      if (!confirmar) return;
+    }
+
+    const { data, error } = await supabase
+      .from("autos")
+      .insert({
+        agente_id: user.id,
+        tipo_documento: dados.tipoDocumento,
+        suspeito: dados.suspeito,
+        local: dados.local,
+        artigos: selecionados,
+        coima_min: totais.coimaMin,
+        coima_max: totais.coimaMax,
+        pena_min: totais.penaMin,
+        pena_max: totais.penaMax,
+        observacoes: dados.observacoes,
+        agente_nome: perfil.nome || dados.agente,
+        agente_cargo: perfil.cargo || dados.posto,
+        agente_nim: perfil.nim || dados.nim,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Erro ao guardar auto:", error);
+      alert("Erro ao guardar o auto. Vê a consola para mais detalhes.");
+      return;
+    }
+
+    alert(`Auto #${data?.id || ""} guardado com sucesso.`);
+
+    if (mostrarAutos) {
+      await carregarMeusAutos();
+    }
+  }
+
+  function carregarAutoParaFormulario(auto) {
+    const artigos = Array.isArray(auto.artigos) ? auto.artigos : [];
+
+    setSelecionados(artigos);
+    setDados((atuais) => ({
+      ...atuais,
+      tipoDocumento: auto.tipo_documento || atuais.tipoDocumento,
+      agente: auto.agente_nome || atuais.agente,
+      posto: auto.agente_cargo || atuais.posto,
+      nim: auto.agente_nim || atuais.nim,
+      suspeito: auto.suspeito || "",
+      local: auto.local || "",
+      observacoes: auto.observacoes || atuais.observacoes,
+      numeroProcesso: auto.id ? `AUTO-${auto.id}` : atuais.numeroProcesso,
+    }));
+    setMostrarAutos(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function criarRelatorioDeAuto(auto) {
+    const artigos = Array.isArray(auto.artigos) ? auto.artigos : [];
+    const totaisAuto = {
+      coimaMin: auto.coima_min || 0,
+      coimaMax: auto.coima_max || 0,
+      penaMin: auto.pena_min || 0,
+      penaMax: auto.pena_max || 0,
+    };
+
+    const dadosAuto = {
+      ...dados,
+      tipoDocumento: auto.tipo_documento || dados.tipoDocumento,
+      agente: auto.agente_nome || dados.agente,
+      posto: auto.agente_cargo || dados.posto,
+      nim: auto.agente_nim || dados.nim,
+      suspeito: auto.suspeito || "",
+      local: auto.local || "",
+      observacoes: auto.observacoes || dados.observacoes,
+      numeroProcesso: auto.id ? `AUTO-${auto.id}` : "",
+      dataHora: auto.created_at ? new Date(auto.created_at).toLocaleString("pt-PT") : dados.dataHora,
+    };
+
+    return criarRelatorioOficial(dadosAuto, artigos, totaisAuto);
+  }
+
+  function exportarAutosJSON() {
+    const blob = new Blob([JSON.stringify(autosGuardados, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `psa-autos-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function apagarAuto(id) {
+    const confirmar = confirm(`Tens a certeza que queres apagar o Auto #${id}?`);
+    if (!confirmar) return;
+
+    const { error } = await supabase.from("autos").delete().eq("id", id);
+
+    if (error) {
+      alert("Não foi possível apagar. Se a policy de DELETE não existir no Supabase, tens de a criar primeiro.");
+      console.error(error);
+      return;
+    }
+
+    setAutosGuardados((atuais) => atuais.filter((auto) => auto.id !== id));
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#07110a] text-white flex items-center justify-center p-6">
+        <div className="rounded-3xl border border-[#d4af37]/30 bg-[#0e1c11] p-8 shadow-2xl">
+          <p className="text-slate-300 font-bold">A carregar PSA Autos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+  return (
+    <div className="min-h-screen bg-[#07110a] text-white flex items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-3xl border border-[#d4af37]/30 bg-[#0e1c11] p-8 shadow-2xl">
+        <h1 className="text-3xl font-black mb-2">PSA AUTOS</h1>
+        <p className="text-slate-400 mb-6">Iniciar sessão</p>
+
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+          className="w-full mb-3 rounded-xl bg-[#07110a] border border-emerald-900 px-4 py-3"
+        />
+
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          placeholder="Password"
+          className="w-full mb-4 rounded-xl bg-[#07110a] border border-emerald-900 px-4 py-3"
+        />
+
+        <button
+          onClick={login}
+          className="w-full rounded-xl bg-[#d4af37] text-black font-black py-3"
+        >
+          Entrar
+        </button>
+
+        <button
+          onClick={registar}
+          className="w-full mt-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-black py-3"
+        >
+          Criar conta
+        </button>
+      </div>
+    </div>
+  );
+}
   return (
     <div className="min-h-screen bg-[#07110a] text-slate-100 relative overflow-hidden p-4 md:p-6">
       <div className="pointer-events-none fixed inset-0 opacity-90">
@@ -735,12 +1095,131 @@ export default function App() {
             <div className="flex flex-wrap gap-3">
               <button onClick={() => setModoPatrulha(!modoPatrulha)} className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition ${modoPatrulha ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "bg-white/10 hover:bg-white/15 border border-white/10"}`}><Zap className="h-4 w-4" /> Modo patrulha</button>
               <button onClick={imprimir} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition"><Printer className="h-4 w-4" /> Imprimir/PDF</button>
+              <button onClick={() => setMostrarPerfil(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Perfil</button>
+              <button onClick={guardarAuto} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar auto</button>
+              <button onClick={carregarMeusAutos} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Meus Autos</button>
+              <button onClick={logout} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Sair</button>
               <button onClick={reset} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-5 py-3 text-sm font-black shadow-lg shadow-[#d4af37]/20 transition"><RotateCcw className="h-4 w-4" /> Limpar auto</button>
             </div>
           </div>
         </header>
 
         {copiado && <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 px-4 py-3">Copiado: {copiado}</div>}
+
+        {mostrarPerfil && (
+          <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-bold">Perfil do Agente</div>
+                <p className="text-sm text-slate-400">Estes dados entram automaticamente em todos os novos autos.</p>
+              </div>
+              <button onClick={() => setMostrarPerfil(false)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
+            </div>
+
+            {carregandoPerfil ? (
+              <p className="text-slate-400">A carregar perfil...</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="block mb-1.5 text-sm font-black text-slate-300">Nome do agente</span>
+                  <input value={perfil.nome} onChange={(e) => setPerfil({ ...perfil, nome: e.target.value })} placeholder="Ex: João Tomás" className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/70 px-4 py-3 outline-none focus:border-[#d4af37] transition" />
+                </label>
+
+                <label className="block">
+                  <span className="block mb-1.5 text-sm font-black text-slate-300">Cargo/Posto</span>
+                  <input value={perfil.cargo} onChange={(e) => setPerfil({ ...perfil, cargo: e.target.value })} placeholder="Ex: Guarda" className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/70 px-4 py-3 outline-none focus:border-[#d4af37] transition" />
+                </label>
+
+                <label className="block">
+                  <span className="block mb-1.5 text-sm font-black text-slate-300">NIM</span>
+                  <input value={perfil.nim} onChange={(e) => setPerfil({ ...perfil, nim: e.target.value })} placeholder="Ex: 2026004" className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/70 px-4 py-3 outline-none focus:border-[#d4af37] transition" />
+                </label>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={guardarPerfil} disabled={guardandoPerfil} className="rounded-2xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-5 py-3 text-sm font-black shadow-lg shadow-[#d4af37]/20 transition disabled:opacity-50">
+                {guardandoPerfil ? "A guardar..." : "Guardar Perfil"}
+              </button>
+              <button onClick={() => carregarPerfil(user)} className="rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Recarregar</button>
+            </div>
+          </section>
+        )}
+
+        {mostrarAutos && (
+          <section className="rounded-[1.7rem] border border-white/10 bg-[#0e1c11]/85 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-bold">Meus Autos</div>
+                <p className="text-sm text-slate-400">Histórico dos autos guardados pelo teu utilizador.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={carregarMeusAutos} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition">Atualizar</button>
+                <button onClick={exportarAutosJSON} disabled={autosGuardados.length === 0} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition disabled:opacity-40">Exportar JSON</button>
+                <button onClick={() => setMostrarAutos(false)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3"><div className="text-xs text-slate-400 font-bold">Autos</div><div className="text-2xl font-black">{estatisticasAutos.total}</div></div>
+              <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3"><div className="text-xs text-slate-400 font-bold">Coima mínima total</div><div className="text-2xl font-black">{money(estatisticasAutos.coimaMin)}</div></div>
+              <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3"><div className="text-xs text-slate-400 font-bold">Coima máxima total</div><div className="text-2xl font-black">{money(estatisticasAutos.coimaMax)}</div></div>
+              <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3"><div className="text-xs text-slate-400 font-bold">Pena mínima total</div><div className="text-2xl font-black">{years(estatisticasAutos.penaMin)}</div></div>
+            </div>
+
+            <input
+              value={autoPesquisa}
+              onChange={(e) => setAutoPesquisa(e.target.value)}
+              placeholder="Pesquisar por id, suspeito, local ou tipo..."
+              className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition"
+            />
+
+            {carregandoAutos ? (
+              <p className="text-slate-400">A carregar autos...</p>
+            ) : autosFiltrados.length === 0 ? (
+              <p className="text-slate-400">Não existem autos para mostrar.</p>
+            ) : (
+              <div className="space-y-3 max-h-[520px] overflow-auto pr-1">
+                {autosFiltrados.map((auto) => (
+                  <article key={auto.id} className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-4 hover:border-[#d4af37]/40 transition">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="font-black">Auto #{auto.id} — {auto.tipo_documento || "Sem tipo"}</div>
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-300">
+                          <div><b>Agente:</b> {auto.agente_cargo || ""} {auto.agente_nome || ""} {auto.agente_nim ? `(NIM ${auto.agente_nim})` : ""}</div>
+                          <div><b>Suspeito:</b> {auto.suspeito || "Sem identificação"}</div>
+                          <div><b>Local:</b> {auto.local || "Sem local"}</div>
+                          <div><b>Coima:</b> {money(auto.coima_min || 0)} - {money(auto.coima_max || 0)}</div>
+                          <div><b>Pena:</b> {years(auto.pena_min || 0)} - {years(auto.pena_max || 0)}</div>
+                          <div><b>Data:</b> {auto.created_at ? new Date(auto.created_at).toLocaleString("pt-PT") : "Sem data"}</div>
+                          <div><b>Artigos:</b> {Array.isArray(auto.artigos) ? auto.artigos.length : 0}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => carregarAutoParaFormulario(auto)} className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-bold transition">Carregar</button>
+                        <button onClick={() => copy(criarRelatorioDeAuto(auto), `auto #${auto.id}`)} className="rounded-xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-3 py-2 text-sm font-black transition">Copiar</button>
+                        <button onClick={() => apagarAuto(auto.id)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Apagar</button>
+                      </div>
+                    </div>
+
+                    {Array.isArray(auto.artigos) && auto.artigos.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {auto.artigos.slice(0, 12).map((a, index) => (
+                          <span key={`${auto.id}-${index}`} className="rounded-lg bg-[#1a291b] border border-white/10 px-2 py-1 text-xs text-slate-300">Art. {a.artigo}.º — {a.nome}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {auto.observacoes && (
+                      <div className="mt-3 rounded-xl bg-black/20 border border-white/10 p-3 text-sm text-slate-300"><b>Observações:</b> {auto.observacoes}</div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Kpi icon={<FileText />} label="Artigos selecionados" value={selecionados.length} />
@@ -809,6 +1288,7 @@ export default function App() {
                 <Field label="N.º Processo/Auto" value={dados.numeroProcesso} onChange={(v) => setDados({ ...dados, numeroProcesso: v })} />
                 <Field label="Agente" value={dados.agente} onChange={(v) => setDados({ ...dados, agente: v })} />
                 <Field label="Posto" value={dados.posto} onChange={(v) => setDados({ ...dados, posto: v })} />
+                <Field label="NIM" value={dados.nim} onChange={(v) => setDados({ ...dados, nim: v })} />
                 <Field label="Suspeito" value={dados.suspeito} onChange={(v) => setDados({ ...dados, suspeito: v })} />
                 <Field label="Local" value={dados.local} onChange={(v) => setDados({ ...dados, local: v })} />
                 <Field label="Matrícula/Viatura" value={dados.matricula} onChange={(v) => setDados({ ...dados, matricula: v })} />
