@@ -1,6 +1,5 @@
 Thomas
 canyoubequiet
-•
 :RubberDucky: Исус на небето, Йоан на земята
 
 [00:26]Thomas [GTL], : sozinho nao faço nada
