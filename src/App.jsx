@@ -697,7 +697,8 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
-  const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "" });
+  const [mostrarFormacao, setMostrarFormacao] = useState(false);
+  const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "", can_formacao: false, can_admin_formacao: false });
   const [carregandoPerfil, setCarregandoPerfil] = useState(false);
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
 
@@ -891,7 +892,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,email,nome,cargo,nim")
+      .select("id,email,nome,cargo,nim,can_formacao,can_admin_formacao")
       .eq("id", utilizador.id)
       .maybeSingle();
 
@@ -906,6 +907,8 @@ export default function App() {
       nome: data?.nome || "",
       cargo: data?.cargo || "",
       nim: data?.nim || "",
+      can_formacao: !!data?.can_formacao,
+      can_admin_formacao: !!data?.can_admin_formacao,
     };
 
     setPerfil(perfilAtual);
@@ -1176,6 +1179,9 @@ export default function App() {
               <button onClick={() => setModoPatrulha(!modoPatrulha)} className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition ${modoPatrulha ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "bg-white/10 hover:bg-white/15 border border-white/10"}`}><Zap className="h-4 w-4" /> Modo patrulha</button>
               <button onClick={imprimir} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition"><Printer className="h-4 w-4" /> Imprimir/PDF</button>
               <button onClick={() => setMostrarPerfil(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Perfil</button>
+              {(perfil.can_formacao || perfil.can_admin_formacao) && (
+                <button onClick={() => setMostrarFormacao(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Recrutamento/Formação</button>
+              )}
               <button onClick={guardarAuto} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar auto</button>
               <button onClick={carregarMeusAutos} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Meus Autos</button>
               <button onClick={logout} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Sair</button>
@@ -1185,6 +1191,14 @@ export default function App() {
         </header>
 
         {copiado && <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 px-4 py-3">Copiado: {copiado}</div>}
+
+        {mostrarFormacao && (
+          <ModuloRecrutamentoFormacao
+            perfil={perfil}
+            user={user}
+            onClose={() => setMostrarFormacao(false)}
+          />
+        )}
 
         {mostrarPerfil && (
           <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-4">
@@ -1423,6 +1437,442 @@ export default function App() {
 
       </div>
     </div>
+  );
+}
+
+
+function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
+  const modulosBase = [
+    "Integração na PSA",
+    "Postura e disciplina",
+    "Comunicações rádio",
+    "Abordagens e fiscalização",
+    "Código da Estrada",
+    "Código Penal",
+    "Autos e expediente",
+    "Condução operacional",
+    "Seguimento tático",
+    "Uso progressivo da força",
+  ];
+
+  const temAcesso = !!(perfil?.can_formacao || perfil?.can_admin_formacao);
+  const isAdminFormacao = !!perfil?.can_admin_formacao;
+
+  const [recrutas, setRecrutas] = useState([]);
+  const [modulos, setModulos] = useState([]);
+  const [avaliacoes, setAvaliacoes] = useState([]);
+  const [modulosConcluidos, setModulosConcluidos] = useState([]);
+  const [selecionadoId, setSelecionadoId] = useState(null);
+  const [loadingFormacao, setLoadingFormacao] = useState(false);
+  const [form, setForm] = useState({
+    nome: "",
+    nim: "",
+    contacto: "",
+    discord: "",
+    estado: "Candidato",
+    formador: perfil?.nome || "",
+    observacoes: "",
+  });
+
+  useEffect(() => {
+    if (temAcesso) carregarDadosFormacao();
+  }, [temAcesso]);
+
+  async function carregarDadosFormacao() {
+    setLoadingFormacao(true);
+
+    const [candidatosRes, modulosRes, avaliacoesRes, concluidosRes] = await Promise.all([
+      supabase.from("recrutamento_candidatos").select("*").order("created_at", { ascending: false }),
+      supabase.from("formacao_modulos").select("*").eq("ativo", true).order("id", { ascending: true }),
+      supabase.from("formacao_avaliacoes").select("*").order("created_at", { ascending: false }),
+      supabase.from("formacao_modulos_concluidos").select("*").order("data_conclusao", { ascending: false }),
+    ]);
+
+    setLoadingFormacao(false);
+
+    const erro = candidatosRes.error || modulosRes.error || avaliacoesRes.error || concluidosRes.error;
+    if (erro) {
+      console.error("Erro ao carregar formação:", erro);
+      alert("Não foi possível carregar Recrutamento/Formação. Confirma se tens permissão no Supabase.");
+      return;
+    }
+
+    setModulos(modulosRes.data?.length ? modulosRes.data : modulosBase.map((nome, index) => ({ id: `local-${index}`, nome, descricao: "" })));
+    setAvaliacoes(avaliacoesRes.data || []);
+    setModulosConcluidos(concluidosRes.data || []);
+    setRecrutas(candidatosRes.data || []);
+
+    if (!selecionadoId && candidatosRes.data?.length) setSelecionadoId(candidatosRes.data[0].id);
+  }
+
+  const modulosAtivos = modulos.length ? modulos : modulosBase.map((nome, index) => ({ id: `local-${index}`, nome, descricao: "" }));
+
+  function montarRecruta(r) {
+    if (!r) return null;
+    const concluidos = new Set(
+      modulosConcluidos
+        .filter((m) => m.candidato_id === r.id && m.concluido)
+        .map((m) => String(m.modulo_id))
+    );
+    const modulosObj = Object.fromEntries(modulosAtivos.map((m) => [m.nome, concluidos.has(String(m.id))]));
+    const historico = avaliacoes.filter((a) => a.candidato_id === r.id);
+    const ultima = historico[0] || {
+      disciplina: "",
+      radio: "",
+      legal: "",
+      conducao: "",
+      postura: "",
+      expediente: "",
+      parecer: "Em avaliação",
+      observacoes: "",
+    };
+
+    return {
+      ...r,
+      created_at_formatado: r.created_at ? new Date(r.created_at).toLocaleString("pt-PT") : "Sem data",
+      criado_por_nome: r.formador || perfil?.nome || "Sistema PSA",
+      modulos: modulosObj,
+      avaliacao: ultima,
+      historicoAvaliacoes: historico,
+    };
+  }
+
+  const recrutasPreparados = useMemo(() => recrutas.map(montarRecruta).filter(Boolean), [recrutas, modulosConcluidos, avaliacoes, modulos]);
+  const selecionado = recrutasPreparados.find((r) => r.id === selecionadoId) || recrutasPreparados[0] || null;
+  const totalRecrutas = recrutasPreparados.length;
+  const aptos = recrutasPreparados.filter((r) => r.estado === "Apto" || r.estado === "Guarda Efetivo").length;
+  const emFormacao = recrutasPreparados.filter((r) => r.estado === "Guarda Provisório" || r.estado === "Em formação").length;
+  const candidatos = recrutasPreparados.filter((r) => r.estado === "Candidato" || r.estado === "Em análise").length;
+
+  async function criarRecruta() {
+    if (!form.nome.trim()) {
+      alert("Indica pelo menos o nome do candidato/guarda provisório.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("recrutamento_candidatos")
+      .insert({
+        nome: form.nome.trim(),
+        nim: form.nim.trim() || null,
+        contacto: form.contacto.trim() || null,
+        discord: form.discord.trim() || null,
+        estado: form.estado,
+        formador: form.formador.trim() || perfil?.nome || null,
+        observacoes: form.observacoes.trim() || null,
+        criado_por: user?.id || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Erro ao criar candidato:", error);
+      alert("Erro ao criar candidato/guarda provisório.");
+      return;
+    }
+
+    setForm({ nome: "", nim: "", contacto: "", discord: "", estado: "Candidato", formador: perfil?.nome || "", observacoes: "" });
+    setSelecionadoId(data.id);
+    await carregarDadosFormacao();
+  }
+
+  async function atualizarRecruta(id, patch) {
+    setRecrutas((atuais) => atuais.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+    const camposPermitidos = ["nome", "nim", "contacto", "discord", "estado", "formador", "observacoes"];
+    const payload = Object.fromEntries(Object.entries(patch).filter(([key]) => camposPermitidos.includes(key)));
+    if (!Object.keys(payload).length) return;
+
+    const { error } = await supabase.from("recrutamento_candidatos").update(payload).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar candidato:", error);
+      alert("Erro ao atualizar candidato.");
+      await carregarDadosFormacao();
+    }
+  }
+
+  async function toggleModulo(id, moduloNome) {
+    const modulo = modulosAtivos.find((m) => m.nome === moduloNome);
+    if (!modulo || String(modulo.id).startsWith("local-")) {
+      alert("Módulo não encontrado no Supabase.");
+      return;
+    }
+
+    const jaConcluido = !!selecionado?.modulos?.[moduloNome];
+
+    if (jaConcluido) {
+      const { error } = await supabase
+        .from("formacao_modulos_concluidos")
+        .delete()
+        .eq("candidato_id", id)
+        .eq("modulo_id", modulo.id);
+
+      if (error) {
+        console.error("Erro ao remover módulo:", error);
+        alert("Erro ao remover módulo concluído.");
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("formacao_modulos_concluidos")
+        .upsert({
+          candidato_id: id,
+          modulo_id: modulo.id,
+          concluido: true,
+          data_conclusao: new Date().toISOString(),
+        }, { onConflict: "candidato_id,modulo_id" });
+
+      if (error) {
+        console.error("Erro ao concluir módulo:", error);
+        alert("Erro ao marcar módulo como concluído.");
+        return;
+      }
+    }
+
+    await carregarDadosFormacao();
+  }
+
+  function atualizarAvaliacao(id, campo, valor) {
+    setAvaliacoes((atuais) => {
+      const existentes = atuais.filter((a) => a.candidato_id === id);
+      const ultima = existentes[0];
+
+      if (!ultima) {
+        return [{ candidato_id: id, [campo]: valor, parecer: "Em avaliação", created_at: new Date().toISOString() }, ...atuais];
+      }
+
+      return atuais.map((a) => (a.id === ultima.id ? { ...a, [campo]: valor } : a));
+    });
+  }
+
+  async function guardarAvaliacao(id) {
+    const r = recrutasPreparados.find((item) => item.id === id);
+    if (!r) return;
+
+    const av = r.avaliacao || {};
+    const payload = {
+      candidato_id: id,
+      avaliador_id: user?.id || null,
+      disciplina: av.disciplina === "" ? null : Number(av.disciplina),
+      radio: av.radio === "" ? null : Number(av.radio),
+      legal: av.legal === "" ? null : Number(av.legal),
+      conducao: av.conducao === "" ? null : Number(av.conducao),
+      postura: av.postura === "" ? null : Number(av.postura),
+      expediente: av.expediente === "" ? null : Number(av.expediente),
+      parecer: av.parecer || "Em avaliação",
+      observacoes: av.observacoes || null,
+    };
+
+    const { error } = await supabase.from("formacao_avaliacoes").insert(payload);
+
+    if (error) {
+      console.error("Erro ao guardar avaliação:", error);
+      alert("Erro ao guardar avaliação.");
+      return;
+    }
+
+    alert("Avaliação guardada com sucesso.");
+    await carregarDadosFormacao();
+  }
+
+  async function apagarRecruta(id) {
+    if (!isAdminFormacao) {
+      alert("Apenas administradores da formação podem apagar registos.");
+      return;
+    }
+
+    if (!confirm("Queres apagar este registo de recrutamento/formação?")) return;
+
+    const { error } = await supabase.from("recrutamento_candidatos").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao apagar candidato:", error);
+      alert("Erro ao apagar registo.");
+      return;
+    }
+
+    if (selecionadoId === id) setSelecionadoId(null);
+    await carregarDadosFormacao();
+  }
+
+  function mediaAvaliacao(r) {
+    const av = r?.avaliacao || {};
+    const valores = [av.disciplina, av.radio, av.legal, av.conducao, av.postura, av.expediente]
+      .map((v) => Number(v))
+      .filter((v) => !Number.isNaN(v) && v > 0);
+    if (!valores.length) return "Sem nota";
+    return (valores.reduce((a, b) => a + b, 0) / valores.length).toFixed(1) + "/10";
+  }
+
+  function progressoModulos(r) {
+    const mods = Object.values(r?.modulos || {});
+    if (!mods.length) return "0/0";
+    return `${mods.filter(Boolean).length}/${mods.length}`;
+  }
+
+  function gerarResumoRecruta(r) {
+    if (!r) return "";
+    const feitos = Object.entries(r.modulos || {}).filter(([, feito]) => feito).map(([nome]) => nome);
+    const pendentes = Object.entries(r.modulos || {}).filter(([, feito]) => !feito).map(([nome]) => nome);
+    return `AVALIAÇÃO CFG PSA\n\nMilitar: ${r.nome}${r.nim ? `\nNIM: ${r.nim}` : ""}\nEstado: ${r.estado}\nFormador/Avaliador: ${r.formador || "Não definido"}\n\nMódulos concluídos:\n${feitos.length ? feitos.map((m) => `✓ ${m}`).join("\n") : "[nenhum]"}\n\nMódulos pendentes:\n${pendentes.length ? pendentes.map((m) => `✗ ${m}`).join("\n") : "[nenhum]"}\n\nMédia: ${mediaAvaliacao(r)}\nParecer: ${r.avaliacao?.parecer || "Em avaliação"}\n\nObservações:\n${r.avaliacao?.observacoes || r.observacoes || "[sem observações]"}`;
+  }
+
+  if (!temAcesso) {
+    return (
+      <section className="rounded-[1.7rem] border border-red-500/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xl font-bold text-red-200">Sem autorização</div>
+            <p className="text-sm text-slate-400">O teu perfil ainda não tem permissão para aceder ao módulo de Recrutamento/Formação.</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xl font-bold">Recrutamento / Formação</div>
+          <p className="text-sm text-slate-400">Módulo ligado ao Supabase para gerir candidatos, guardas provisórios, módulos dados e avaliações partilhadas.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={carregarDadosFormacao} disabled={loadingFormacao} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition disabled:opacity-50">{loadingFormacao ? "A carregar..." : "Atualizar"}</button>
+          <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <Kpi icon={<Shield />} label="Registos" value={totalRecrutas} />
+        <Kpi icon={<FileText />} label="Candidatos" value={candidatos} />
+        <Kpi icon={<Calculator />} label="Em formação" value={emFormacao} />
+        <Kpi icon={<Star />} label="Aptos" value={aptos} />
+      </div>
+
+      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
+        <div className="text-lg font-black text-[#d4af37]">Novo candidato / guarda provisório</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Field label="Nome" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
+          <Field label="NIM" value={form.nim} onChange={(v) => setForm({ ...form, nim: v })} />
+          <Field label="Contacto" value={form.contacto} onChange={(v) => setForm({ ...form, contacto: v })} />
+          <Field label="Discord" value={form.discord} onChange={(v) => setForm({ ...form, discord: v })} />
+          <SelectField label="Estado" value={form.estado} onChange={(v) => setForm({ ...form, estado: v })} options={["Candidato", "Em análise", "Guarda Provisório", "Em formação", "Apto", "Não apto", "Guarda Efetivo"]} />
+          <Field label="Formador/Avaliador" value={form.formador} onChange={(v) => setForm({ ...form, formador: v })} />
+        </div>
+        <TextArea label="Observações iniciais" value={form.observacoes} onChange={(v) => setForm({ ...form, observacoes: v })} placeholder="Ex: disponibilidade, experiência, postura na entrevista..." rows={3} />
+        <button onClick={criarRecruta} className="rounded-2xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-5 py-3 text-sm font-black shadow-lg shadow-[#d4af37]/20 transition">Adicionar registo</button>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
+        <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
+          <div className="text-lg font-black">Lista de candidatos / provisórios</div>
+          {loadingFormacao ? (
+            <p className="text-slate-400 text-sm">A carregar registos...</p>
+          ) : recrutasPreparados.length === 0 ? (
+            <p className="text-slate-400 text-sm">Ainda não existem registos.</p>
+          ) : (
+            <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+              {recrutasPreparados.map((r) => (
+                <button key={r.id} onClick={() => setSelecionadoId(r.id)} className={`w-full text-left rounded-2xl border p-3 transition ${selecionado?.id === r.id ? "border-[#d4af37]/70 bg-[#1a291b]" : "border-white/10 bg-[#07110a]/80 hover:border-[#d4af37]/30"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-black">{r.nome}</div>
+                      <div className="text-xs text-slate-400">{r.nim ? `NIM ${r.nim} · ` : ""}{r.estado}</div>
+                      <div className="text-xs text-slate-400 mt-1">Módulos: {progressoModulos(r)} · Média: {mediaAvaliacao(r)}</div>
+                    </div>
+                    <span className="rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-200 px-2 py-1 text-xs font-bold">{r.avaliacao?.parecer || "Em avaliação"}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-4">
+          {!selecionado ? (
+            <p className="text-slate-400">Seleciona um registo para avaliar.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xl font-black">{selecionado.nome}</div>
+                  <div className="text-sm text-slate-400">Criado em {selecionado.created_at_formatado} por {selecionado.criado_por_nome}</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => copy(gerarResumoRecruta(selecionado), "resumo de formação")} className="rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm font-bold transition">Copiar resumo</button>
+                  {isAdminFormacao && <button onClick={() => apagarRecruta(selecionado.id)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Apagar</button>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <SelectField label="Estado" value={selecionado.estado} onChange={(v) => atualizarRecruta(selecionado.id, { estado: v })} options={["Candidato", "Em análise", "Guarda Provisório", "Em formação", "Apto", "Não apto", "Guarda Efetivo"]} />
+                <Field label="Formador/Avaliador" value={selecionado.formador || ""} onChange={(v) => atualizarRecruta(selecionado.id, { formador: v })} />
+              </div>
+
+              <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
+                <div className="font-black mb-3 text-[#d4af37]">Módulos de formação</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {modulosAtivos.map((modulo) => (
+                    <label key={modulo.id} className="flex items-center gap-2 rounded-xl bg-[#0e1c11] border border-white/10 px-3 py-2 text-sm">
+                      <input type="checkbox" checked={!!selecionado.modulos?.[modulo.nome]} onChange={() => toggleModulo(selecionado.id, modulo.nome)} />
+                      <span>{modulo.nome}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 border border-white/10 p-3 space-y-3">
+                <div className="font-black text-[#d4af37]">Avaliação</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Field label="Disciplina" value={selecionado.avaliacao?.disciplina || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "disciplina", v)} />
+                  <Field label="Rádio" value={selecionado.avaliacao?.radio || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "radio", v)} />
+                  <Field label="Conhecimento legal" value={selecionado.avaliacao?.legal || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "legal", v)} />
+                  <Field label="Condução" value={selecionado.avaliacao?.conducao || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "conducao", v)} />
+                  <Field label="Postura" value={selecionado.avaliacao?.postura || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "postura", v)} />
+                  <Field label="Autos/Expediente" value={selecionado.avaliacao?.expediente || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "expediente", v)} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <SelectField label="Parecer" value={selecionado.avaliacao?.parecer || "Em avaliação"} onChange={(v) => atualizarAvaliacao(selecionado.id, "parecer", v)} options={["Em avaliação", "Apto", "Não apto", "Necessita nova avaliação"]} />
+                  <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3">
+                    <div className="text-sm text-slate-400 font-bold">Média atual</div>
+                    <div className="text-2xl font-black">{mediaAvaliacao(selecionado)}</div>
+                  </div>
+                </div>
+                <TextArea label="Observações da avaliação" value={selecionado.avaliacao?.observacoes || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "observacoes", v)} placeholder="Pontos fortes, pontos a melhorar, ocorrências durante formação..." rows={4} />
+                <button onClick={() => guardarAvaliacao(selecionado.id)} className="rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar avaliação</button>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 border border-white/10 p-3 space-y-3">
+                <div className="font-black text-[#d4af37]">Histórico de avaliações</div>
+                {selecionado.historicoAvaliacoes.length === 0 ? (
+                  <p className="text-sm text-slate-400">Ainda não existem avaliações guardadas.</p>
+                ) : (
+                  <div className="space-y-2 max-h-[260px] overflow-auto pr-1">
+                    {selecionado.historicoAvaliacoes.map((av, index) => (
+                      <div key={av.id || index} className="rounded-xl bg-[#07110a]/80 border border-white/10 p-3 text-sm text-slate-300">
+                        <div className="font-black text-white">Avaliação #{selecionado.historicoAvaliacoes.length - index}</div>
+                        <div className="text-xs text-slate-400">{av.created_at ? new Date(av.created_at).toLocaleString("pt-PT") : "Sem data"}</div>
+                        <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-1">
+                          <div>Disciplina: <b>{av.disciplina ?? "-"}</b></div>
+                          <div>Rádio: <b>{av.radio ?? "-"}</b></div>
+                          <div>Legal: <b>{av.legal ?? "-"}</b></div>
+                          <div>Condução: <b>{av.conducao ?? "-"}</b></div>
+                          <div>Postura: <b>{av.postura ?? "-"}</b></div>
+                          <div>Expediente: <b>{av.expediente ?? "-"}</b></div>
+                        </div>
+                        <div className="mt-2"><b>Parecer:</b> {av.parecer || "Em avaliação"}</div>
+                        {av.observacoes && <div className="mt-1 whitespace-pre-wrap"><b>Obs.:</b> {av.observacoes}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
