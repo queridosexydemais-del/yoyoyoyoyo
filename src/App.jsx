@@ -1476,6 +1476,7 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
   const [modulosConcluidos, setModulosConcluidos] = useState([]);
   const [selecionadoId, setSelecionadoId] = useState(null);
   const [loadingFormacao, setLoadingFormacao] = useState(false);
+  const [filtroFormacao, setFiltroFormacao] = useState("Todos");
   const [form, setForm] = useState({
     nome: "",
     nim: "",
@@ -1555,6 +1556,41 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
   const aptos = recrutasPreparados.filter((r) => r.estado === "Apto" || r.estado === "Guarda Efetivo").length;
   const emFormacao = recrutasPreparados.filter((r) => r.estado === "Guarda Provisório" || r.estado === "Em formação").length;
   const candidatos = recrutasPreparados.filter((r) => r.estado === "Candidato" || r.estado === "Em análise").length;
+  const naoAptos = recrutasPreparados.filter((r) => r.estado === "Não apto").length;
+
+  const recrutasFiltrados = useMemo(() => {
+    if (filtroFormacao === "Candidatos") return recrutasPreparados.filter((r) => r.estado === "Candidato" || r.estado === "Em análise");
+    if (filtroFormacao === "Guardas Provisórios") return recrutasPreparados.filter((r) => r.estado === "Guarda Provisório" || r.estado === "Em formação");
+    if (filtroFormacao === "Aptos") return recrutasPreparados.filter((r) => r.estado === "Apto" || r.estado === "Guarda Efetivo");
+    if (filtroFormacao === "Não aptos") return recrutasPreparados.filter((r) => r.estado === "Não apto");
+    return recrutasPreparados;
+  }, [recrutasPreparados, filtroFormacao]);
+
+  const mediaGeralFormacao = useMemo(() => {
+    const medias = recrutasPreparados
+      .map((r) => {
+        const av = r?.avaliacao || {};
+        const valores = [av.disciplina, av.radio, av.legal, av.conducao, av.postura, av.expediente]
+          .map((v) => Number(v))
+          .filter((v) => !Number.isNaN(v) && v > 0);
+        if (!valores.length) return null;
+        return valores.reduce((a, b) => a + b, 0) / valores.length;
+      })
+      .filter((v) => v !== null);
+    if (!medias.length) return "Sem nota";
+    return (medias.reduce((a, b) => a + b, 0) / medias.length).toFixed(1) + "/10";
+  }, [recrutasPreparados]);
+
+  const moduloMaisEmFalta = useMemo(() => {
+    const contagem = {};
+    recrutasPreparados.forEach((r) => {
+      Object.entries(r.modulos || {}).forEach(([nome, concluido]) => {
+        if (!concluido) contagem[nome] = (contagem[nome] || 0) + 1;
+      });
+    });
+    const ordenado = Object.entries(contagem).sort((a, b) => b[1] - a[1]);
+    return ordenado[0] ? `${ordenado[0][0]} (${ordenado[0][1]})` : "Sem módulos em falta";
+  }, [recrutasPreparados]);
 
   async function criarRecruta() {
     if (!form.nome.trim()) {
@@ -1728,6 +1764,28 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
     return `AVALIAÇÃO CFG PSA\n\nMilitar: ${r.nome}${r.nim ? `\nNIM: ${r.nim}` : ""}\nEstado: ${r.estado}\nFormador/Avaliador: ${r.formador || "Não definido"}\n\nMódulos concluídos:\n${feitos.length ? feitos.map((m) => `✓ ${m}`).join("\n") : "[nenhum]"}\n\nMódulos pendentes:\n${pendentes.length ? pendentes.map((m) => `✗ ${m}`).join("\n") : "[nenhum]"}\n\nMédia: ${mediaAvaliacao(r)}\nParecer: ${r.avaliacao?.parecer || "Em avaliação"}\n\nObservações:\n${r.avaliacao?.observacoes || r.observacoes || "[sem observações]"}`;
   }
 
+  function gerarRelatorioFinalCFG(r) {
+    if (!r) return "";
+    const feitos = Object.entries(r.modulos || {}).filter(([, feito]) => feito).map(([nome]) => nome);
+    const pendentes = Object.entries(r.modulos || {}).filter(([, feito]) => !feito).map(([nome]) => nome);
+    const historico = r.historicoAvaliacoes || [];
+    const avaliacoesTexto = historico.length
+      ? historico.map((av, index) => {
+          const data = av.created_at ? new Date(av.created_at).toLocaleString("pt-PT") : "Sem data";
+          return `Avaliação ${historico.length - index} — ${data}\nDisciplina: ${av.disciplina ?? "-"} | Rádio: ${av.radio ?? "-"} | Legal: ${av.legal ?? "-"} | Condução: ${av.conducao ?? "-"} | Postura: ${av.postura ?? "-"} | Expediente: ${av.expediente ?? "-"}\nParecer: ${av.parecer || "Em avaliação"}${av.observacoes ? `\nObservações: ${av.observacoes}` : ""}`;
+        }).join("\n\n")
+      : "[sem avaliações guardadas]";
+
+    return `RELATÓRIO FINAL CFG — PSA\n\nMilitar: ${r.nome}${r.nim ? `\nNIM: ${r.nim}` : ""}\nEstado atual: ${r.estado}\nContacto: ${r.contacto || "Não indicado"}\nDiscord: ${r.discord || "Não indicado"}\n\nMÓDULOS CONCLUÍDOS\n${feitos.length ? feitos.map((m) => `✓ ${m}`).join("\n") : "[nenhum]"}\n\nMÓDULOS EM FALTA\n${pendentes.length ? pendentes.map((m) => `✗ ${m}`).join("\n") : "Nenhum"}\n\nMÉDIA FINAL\n${mediaAvaliacao(r)}\n\nHISTÓRICO DE AVALIAÇÕES\n${avaliacoesTexto}\n\nPARECER FINAL\n${r.avaliacao?.parecer || "Em avaliação"}\n\nOBSERVAÇÕES FINAIS\n${r.avaliacao?.observacoes || r.observacoes || "[sem observações]"}\n\nRelatório elaborado no sistema PSA Autos.`;
+  }
+
+  function classeEstadoFormacao(estado) {
+    if (estado === "Apto" || estado === "Guarda Efetivo") return "bg-emerald-500/15 border-emerald-500/25 text-emerald-200";
+    if (estado === "Não apto") return "bg-red-500/15 border-red-500/25 text-red-200";
+    if (estado === "Guarda Provisório" || estado === "Em formação") return "bg-sky-500/15 border-sky-500/25 text-sky-200";
+    return "bg-amber-500/15 border-amber-500/25 text-amber-200";
+  }
+
   if (!temAcesso) {
     return (
       <section className="rounded-[1.7rem] border border-red-500/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-3">
@@ -1755,11 +1813,18 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <Kpi icon={<Shield />} label="Registos" value={totalRecrutas} />
         <Kpi icon={<FileText />} label="Candidatos" value={candidatos} />
         <Kpi icon={<Calculator />} label="Em formação" value={emFormacao} />
         <Kpi icon={<Star />} label="Aptos" value={aptos} />
+        <Kpi icon={<Trash2 />} label="Não aptos" value={naoAptos} />
+        <Kpi icon={<Calculator />} label="Média geral" value={mediaGeralFormacao} />
+      </div>
+
+      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4">
+        <div className="text-sm text-slate-400 font-bold">Módulo mais em falta</div>
+        <div className="mt-1 text-xl font-black text-[#d4af37]">{moduloMaisEmFalta}</div>
       </div>
 
       <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
@@ -1778,14 +1843,23 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
         <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
-          <div className="text-lg font-black">Lista de candidatos / provisórios</div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-lg font-black">Lista de candidatos / provisórios</div>
+            <div className="flex flex-wrap gap-2">
+              {["Todos", "Candidatos", "Guardas Provisórios", "Aptos", "Não aptos"].map((f) => (
+                <button key={f} onClick={() => setFiltroFormacao(f)} className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${filtroFormacao === f ? "bg-[#d4af37] text-[#151406]" : "bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200"}`}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
           {loadingFormacao ? (
             <p className="text-slate-400 text-sm">A carregar registos...</p>
-          ) : recrutasPreparados.length === 0 ? (
-            <p className="text-slate-400 text-sm">Ainda não existem registos.</p>
+          ) : recrutasFiltrados.length === 0 ? (
+            <p className="text-slate-400 text-sm">Não existem registos neste filtro.</p>
           ) : (
             <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
-              {recrutasPreparados.map((r) => (
+              {recrutasFiltrados.map((r) => (
                 <button key={r.id} onClick={() => setSelecionadoId(r.id)} className={`w-full text-left rounded-2xl border p-3 transition ${selecionado?.id === r.id ? "border-[#d4af37]/70 bg-[#1a291b]" : "border-white/10 bg-[#07110a]/80 hover:border-[#d4af37]/30"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -1793,7 +1867,7 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
                       <div className="text-xs text-slate-400">{r.nim ? `NIM ${r.nim} · ` : ""}{r.estado}</div>
                       <div className="text-xs text-slate-400 mt-1">Módulos: {progressoModulos(r)} · Média: {mediaAvaliacao(r)}</div>
                     </div>
-                    <span className="rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-200 px-2 py-1 text-xs font-bold">{r.avaliacao?.parecer || "Em avaliação"}</span>
+                    <span className={`rounded-lg border px-2 py-1 text-xs font-bold ${classeEstadoFormacao(r.estado)}`}>{r.estado}</span>
                   </div>
                 </button>
               ))}
@@ -1813,8 +1887,26 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => copy(gerarResumoRecruta(selecionado), "resumo de formação")} className="rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm font-bold transition">Copiar resumo</button>
+                  <button onClick={() => copy(gerarRelatorioFinalCFG(selecionado), "relatório final CFG")} className="rounded-xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-3 py-2 text-sm font-black transition">Relatório Final CFG</button>
                   {isAdminFormacao && <button onClick={() => apagarRecruta(selecionado.id)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Apagar</button>}
                 </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
+                <div className="font-black mb-3 text-[#d4af37]">Ficha individual</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-slate-300">
+                  <div><b className="text-white">Estado:</b> <span className={`ml-1 rounded-lg border px-2 py-1 text-xs font-bold ${classeEstadoFormacao(selecionado.estado)}`}>{selecionado.estado}</span></div>
+                  <div><b className="text-white">NIM:</b> {selecionado.nim || "Não indicado"}</div>
+                  <div><b className="text-white">Contacto:</b> {selecionado.contacto || "Não indicado"}</div>
+                  <div><b className="text-white">Discord:</b> {selecionado.discord || "Não indicado"}</div>
+                  <div><b className="text-white">Módulos:</b> {progressoModulos(selecionado)}</div>
+                  <div><b className="text-white">Média:</b> {mediaAvaliacao(selecionado)}</div>
+                </div>
+                {selecionado.observacoes && (
+                  <div className="mt-3 rounded-xl bg-[#07110a]/80 border border-white/10 p-3 text-sm text-slate-300 whitespace-pre-wrap">
+                    <b className="text-white">Observações iniciais:</b> {selecionado.observacoes}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
