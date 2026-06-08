@@ -698,6 +698,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
   const [mostrarFormacao, setMostrarFormacao] = useState(false);
+  const [mostrarAdminFormacao, setMostrarAdminFormacao] = useState(false);
   const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "", can_formacao: false, can_admin_formacao: false });
   const [carregandoPerfil, setCarregandoPerfil] = useState(false);
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
@@ -1182,6 +1183,9 @@ export default function App() {
               {(perfil.can_formacao || perfil.can_admin_formacao) && (
                 <button onClick={() => setMostrarFormacao(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Recrutamento/Formação</button>
               )}
+              {perfil.can_admin_formacao && (
+                <button onClick={() => setMostrarAdminFormacao(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#d4af37]/15 hover:bg-[#d4af37]/25 border border-[#d4af37]/30 text-[#f3d889] px-5 py-3 text-sm font-black transition">Administração PSA</button>
+              )}
               <button onClick={guardarAuto} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar auto</button>
               <button onClick={carregarMeusAutos} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Meus Autos</button>
               <button onClick={logout} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Sair</button>
@@ -1197,6 +1201,14 @@ export default function App() {
             perfil={perfil}
             user={user}
             onClose={() => setMostrarFormacao(false)}
+          />
+        )}
+
+        {mostrarAdminFormacao && perfil.can_admin_formacao && (
+          <ModuloAdministracaoPSA
+            perfil={perfil}
+            user={user}
+            onClose={() => setMostrarAdminFormacao(false)}
           />
         )}
 
@@ -1871,6 +1883,155 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
             </>
           )}
         </div>
+      </div>
+    </section>
+  );
+}
+
+
+function ModuloAdministracaoPSA({ perfil, user, onClose }) {
+  const [utilizadores, setUtilizadores] = useState([]);
+  const [pesquisa, setPesquisa] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    carregarUtilizadores();
+  }, []);
+
+  async function carregarUtilizadores() {
+    setCarregando(true);
+    setErro("");
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,email,nome,cargo,nim,can_formacao,can_admin_formacao")
+      .order("nome", { ascending: true });
+
+    setCarregando(false);
+
+    if (error) {
+      console.error("Erro ao carregar utilizadores:", error);
+      setErro("Não foi possível carregar utilizadores. Confirma se existem policies no Supabase para administradores de formação poderem ler a tabela profiles.");
+      return;
+    }
+
+    setUtilizadores(data || []);
+  }
+
+  async function atualizarPermissao(utilizador, campo, valor) {
+    setErro("");
+
+    const patch = { [campo]: valor };
+
+    if (campo === "can_admin_formacao" && valor === true) {
+      patch.can_formacao = true;
+    }
+
+    if (utilizador.id === user?.id && campo === "can_admin_formacao" && valor === false) {
+      const confirmar = confirm("Estás a remover a tua própria permissão de administrador de formação. Queres continuar?");
+      if (!confirmar) return;
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(patch)
+      .eq("id", utilizador.id);
+
+    if (error) {
+      console.error("Erro ao atualizar permissões:", error);
+      setErro("Não foi possível atualizar permissões. Confirma se a policy de UPDATE na tabela profiles permite can_admin_formacao.");
+      return;
+    }
+
+    setUtilizadores((atuais) => atuais.map((u) => u.id === utilizador.id ? { ...u, ...patch } : u));
+  }
+
+  const filtrados = useMemo(() => {
+    const q = normalize(pesquisa);
+    if (!q) return utilizadores;
+    return utilizadores.filter((u) => normalize(`${u.nome || ""} ${u.email || ""} ${u.cargo || ""} ${u.nim || ""}`).includes(q));
+  }, [utilizadores, pesquisa]);
+
+  const totalFormadores = utilizadores.filter((u) => u.can_formacao).length;
+  const totalAdmins = utilizadores.filter((u) => u.can_admin_formacao).length;
+
+  return (
+    <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xl font-bold">Administração PSA</div>
+          <p className="text-sm text-slate-400">Gestão de permissões para o módulo Recrutamento/Formação.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={carregarUtilizadores} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition">Atualizar</button>
+          <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Kpi icon={<Shield />} label="Utilizadores" value={utilizadores.length} />
+        <Kpi icon={<FileText />} label="Formadores/Avaliadores" value={totalFormadores} />
+        <Kpi icon={<Star />} label="Administradores" value={totalAdmins} />
+      </div>
+
+      {erro && (
+        <div className="rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 px-4 py-3 text-sm whitespace-pre-wrap">{erro}</div>
+      )}
+
+      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
+        <div className="text-lg font-black text-[#d4af37]">Permissões de Formação</div>
+        <p className="text-sm text-slate-400">
+          Ativa <b>Formador/Avaliador</b> para quem deve ver e usar a aba Recrutamento/Formação. Ativa <b>Admin Formação</b> apenas para Comando/elementos autorizados a gerir permissões.
+        </p>
+        <input
+          value={pesquisa}
+          onChange={(e) => setPesquisa(e.target.value)}
+          placeholder="Pesquisar por nome, email, cargo ou NIM..."
+          className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition"
+        />
+      </div>
+
+      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4">
+        {carregando ? (
+          <p className="text-slate-400">A carregar utilizadores...</p>
+        ) : filtrados.length === 0 ? (
+          <p className="text-slate-400">Não foram encontrados utilizadores.</p>
+        ) : (
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-1">
+            {filtrados.map((u) => (
+              <div key={u.id} className="rounded-2xl bg-[#0e1c11]/80 border border-white/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-black text-white">{u.nome || "Sem nome"}</div>
+                    <div className="text-sm text-slate-400">{u.email || "Sem email"}</div>
+                    <div className="text-xs text-slate-500 mt-1">{u.cargo || "Sem cargo"}{u.nim ? ` · NIM ${u.nim}` : ""}</div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <label className="flex items-center gap-2 rounded-xl bg-[#07110a] border border-white/10 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={!!u.can_formacao}
+                        onChange={(e) => atualizarPermissao(u, "can_formacao", e.target.checked)}
+                      />
+                      <span>Formador/Avaliador</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 rounded-xl bg-[#07110a] border border-[#d4af37]/30 px-3 py-2 text-[#f3d889]">
+                      <input
+                        type="checkbox"
+                        checked={!!u.can_admin_formacao}
+                        onChange={(e) => atualizarPermissao(u, "can_admin_formacao", e.target.checked)}
+                      />
+                      <span>Admin Formação</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
