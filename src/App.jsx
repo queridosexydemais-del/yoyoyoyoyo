@@ -697,9 +697,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
-  const [mostrarFormacao, setMostrarFormacao] = useState(false);
-  const [mostrarAdminFormacao, setMostrarAdminFormacao] = useState(false);
-  const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "", can_formacao: false, can_admin_formacao: false });
+  const [perfil, setPerfil] = useState({ nome: "", cargo: "", nim: "" });
   const [carregandoPerfil, setCarregandoPerfil] = useState(false);
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
 
@@ -893,7 +891,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,email,nome,cargo,nim,can_formacao,can_admin_formacao")
+      .select("id,email,nome,cargo,nim")
       .eq("id", utilizador.id)
       .maybeSingle();
 
@@ -908,8 +906,6 @@ export default function App() {
       nome: data?.nome || "",
       cargo: data?.cargo || "",
       nim: data?.nim || "",
-      can_formacao: !!data?.can_formacao,
-      can_admin_formacao: !!data?.can_admin_formacao,
     };
 
     setPerfil(perfilAtual);
@@ -1180,12 +1176,6 @@ export default function App() {
               <button onClick={() => setModoPatrulha(!modoPatrulha)} className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition ${modoPatrulha ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "bg-white/10 hover:bg-white/15 border border-white/10"}`}><Zap className="h-4 w-4" /> Modo patrulha</button>
               <button onClick={imprimir} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition"><Printer className="h-4 w-4" /> Imprimir/PDF</button>
               <button onClick={() => setMostrarPerfil(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Perfil</button>
-              {(perfil.can_formacao || perfil.can_admin_formacao) && (
-                <button onClick={() => setMostrarFormacao(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Recrutamento/Formação</button>
-              )}
-              {perfil.can_admin_formacao && (
-                <button onClick={() => setMostrarAdminFormacao(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#d4af37]/15 hover:bg-[#d4af37]/25 border border-[#d4af37]/30 text-[#f3d889] px-5 py-3 text-sm font-black transition">Administração PSA</button>
-              )}
               <button onClick={guardarAuto} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar auto</button>
               <button onClick={carregarMeusAutos} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Meus Autos</button>
               <button onClick={logout} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-3 text-sm font-black transition">Sair</button>
@@ -1195,22 +1185,6 @@ export default function App() {
         </header>
 
         {copiado && <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 px-4 py-3">Copiado: {copiado}</div>}
-
-        {mostrarFormacao && (
-          <ModuloRecrutamentoFormacao
-            perfil={perfil}
-            user={user}
-            onClose={() => setMostrarFormacao(false)}
-          />
-        )}
-
-        {mostrarAdminFormacao && perfil.can_admin_formacao && (
-          <ModuloAdministracaoPSA
-            perfil={perfil}
-            user={user}
-            onClose={() => setMostrarAdminFormacao(false)}
-          />
-        )}
 
         {mostrarPerfil && (
           <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-4">
@@ -1453,422 +1427,439 @@ export default function App() {
 }
 
 
-function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
-  const modulosBase = [
-    "Integração na PSA",
-    "Postura e disciplina",
-    "Comunicações rádio",
-    "Abordagens e fiscalização",
-    "Código da Estrada",
-    "Código Penal",
-    "Autos e expediente",
-    "Condução operacional",
-    "Seguimento tático",
-    "Uso progressivo da força",
-  ];
+function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
+  const ESPECIALIDADES_PSA = ["Trânsito", "UCC", "Meio Aéreo", "GIOE", "PIR", "GIC", "EPG"];
+  const ESTADOS_EFETIVO = ["Ativo", "Inativo", "Suspenso"];
+  const canGerir = !!perfil?.can_admin_formacao;
 
-  const temAcesso = !!(perfil?.can_formacao || perfil?.can_admin_formacao);
-  const isAdminFormacao = !!perfil?.can_admin_formacao;
-
-  const [recrutas, setRecrutas] = useState([]);
-  const [modulos, setModulos] = useState([]);
-  const [avaliacoes, setAvaliacoes] = useState([]);
-  const [modulosConcluidos, setModulosConcluidos] = useState([]);
-  const [selecionadoId, setSelecionadoId] = useState(null);
-  const [loadingFormacao, setLoadingFormacao] = useState(false);
-  const [filtroFormacao, setFiltroFormacao] = useState("Todos");
-  const [form, setForm] = useState({
+  const [perfis, setPerfis] = useState([]);
+  const [efetivo, setEfetivo] = useState([]);
+  const [ausencias, setAusencias] = useState([]);
+  const [selecionadoKey, setSelecionadoKey] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+  const [filtro, setFiltro] = useState("Todos");
+  const [pesquisa, setPesquisa] = useState("");
+  const [novo, setNovo] = useState({
     nome: "",
     nim: "",
-    contacto: "",
-    discord: "",
-    estado: "Candidato",
-    formador: perfil?.nome || "",
+    posto: "",
+    email: "",
+    estado: "Ativo",
+    data_inicio_psa: "",
+    especialidades: [],
     observacoes: "",
+  });
+  const [novaAusencia, setNovaAusencia] = useState({
+    tipo: "Ausência",
+    data_inicio: "",
+    data_fim: "",
+    motivo: "",
   });
 
   useEffect(() => {
-    if (temAcesso) carregarDadosFormacao();
-  }, [temAcesso]);
+    carregarEfetivo();
+  }, []);
 
-  async function carregarDadosFormacao() {
-    setLoadingFormacao(true);
+  async function carregarEfetivo() {
+    setLoading(true);
+    setErro("");
 
-    const [candidatosRes, modulosRes, avaliacoesRes, concluidosRes] = await Promise.all([
-      supabase.from("recrutamento_candidatos").select("*").order("created_at", { ascending: false }),
-      supabase.from("formacao_modulos").select("*").eq("ativo", true).order("id", { ascending: true }),
-      supabase.from("formacao_avaliacoes").select("*").order("created_at", { ascending: false }),
-      supabase.from("formacao_modulos_concluidos").select("*").order("data_conclusao", { ascending: false }),
+    const [perfisRes, efetivoRes, ausenciasRes] = await Promise.all([
+      supabase.from("profiles").select("id,email,nome,cargo,nim,can_formacao,can_admin_formacao").order("nome", { ascending: true }),
+      supabase.from("efetivo_psa").select("*").order("nome", { ascending: true }),
+      supabase.from("efetivo_ausencias").select("*").order("data_fim", { ascending: false }),
     ]);
 
-    setLoadingFormacao(false);
+    setLoading(false);
 
-    const erro = candidatosRes.error || modulosRes.error || avaliacoesRes.error || concluidosRes.error;
-    if (erro) {
-      console.error("Erro ao carregar formação:", erro);
-      alert("Não foi possível carregar Recrutamento/Formação. Confirma se tens permissão no Supabase.");
+    const error = perfisRes.error || efetivoRes.error || ausenciasRes.error;
+    if (error) {
+      console.error("Erro ao carregar Efetivo PSA:", error);
+      setErro("Não foi possível carregar o Efetivo PSA. Confirma as permissões e tabelas no Supabase.");
       return;
     }
 
-    setModulos(modulosRes.data?.length ? modulosRes.data : modulosBase.map((nome, index) => ({ id: `local-${index}`, nome, descricao: "" })));
-    setAvaliacoes(avaliacoesRes.data || []);
-    setModulosConcluidos(concluidosRes.data || []);
-    setRecrutas(candidatosRes.data || []);
-
-    if (!selecionadoId && candidatosRes.data?.length) setSelecionadoId(candidatosRes.data[0].id);
+    setPerfis(perfisRes.data || []);
+    setEfetivo(efetivoRes.data || []);
+    setAusencias(ausenciasRes.data || []);
   }
 
-  const modulosAtivos = modulos.length ? modulos : modulosBase.map((nome, index) => ({ id: `local-${index}`, nome, descricao: "" }));
-
-  function montarRecruta(r) {
-    if (!r) return null;
-    const concluidos = new Set(
-      modulosConcluidos
-        .filter((m) => m.candidato_id === r.id && m.concluido)
-        .map((m) => String(m.modulo_id))
-    );
-    const modulosObj = Object.fromEntries(modulosAtivos.map((m) => [m.nome, concluidos.has(String(m.id))]));
-    const historico = avaliacoes.filter((a) => a.candidato_id === r.id);
-    const ultima = historico[0] || {
-      disciplina: "",
-      radio: "",
-      legal: "",
-      conducao: "",
-      postura: "",
-      expediente: "",
-      parecer: "Em avaliação",
-      observacoes: "",
-    };
-
-    return {
-      ...r,
-      created_at_formatado: r.created_at ? new Date(r.created_at).toLocaleString("pt-PT") : "Sem data",
-      criado_por_nome: r.formador || perfil?.nome || "Sistema PSA",
-      modulos: modulosObj,
-      avaliacao: ultima,
-      historicoAvaliacoes: historico,
-    };
+  function chaveMilitar(item) {
+    return item.profile_id ? `profile-${item.profile_id}` : `manual-${item.id}`;
   }
 
-  const recrutasPreparados = useMemo(() => recrutas.map(montarRecruta).filter(Boolean), [recrutas, modulosConcluidos, avaliacoes, modulos]);
-  const selecionado = recrutasPreparados.find((r) => r.id === selecionadoId) || recrutasPreparados[0] || null;
-  const totalRecrutas = recrutasPreparados.length;
-  const aptos = recrutasPreparados.filter((r) => r.estado === "Apto" || r.estado === "Guarda Efetivo").length;
-  const emFormacao = recrutasPreparados.filter((r) => r.estado === "Guarda Provisório" || r.estado === "Em formação").length;
-  const candidatos = recrutasPreparados.filter((r) => r.estado === "Candidato" || r.estado === "Em análise").length;
-  const naoAptos = recrutasPreparados.filter((r) => r.estado === "Não apto").length;
+  function montarMilitares() {
+    const usados = new Set();
+    const lista = [];
 
-  const recrutasFiltrados = useMemo(() => {
-    if (filtroFormacao === "Candidatos") return recrutasPreparados.filter((r) => r.estado === "Candidato" || r.estado === "Em análise");
-    if (filtroFormacao === "Guardas Provisórios") return recrutasPreparados.filter((r) => r.estado === "Guarda Provisório" || r.estado === "Em formação");
-    if (filtroFormacao === "Aptos") return recrutasPreparados.filter((r) => r.estado === "Apto" || r.estado === "Guarda Efetivo");
-    if (filtroFormacao === "Não aptos") return recrutasPreparados.filter((r) => r.estado === "Não apto");
-    return recrutasPreparados;
-  }, [recrutasPreparados, filtroFormacao]);
+    perfis.forEach((p) => {
+      const ficha = efetivo.find((e) =>
+        (e.profile_id && e.profile_id === p.id) ||
+        (e.email && p.email && normalize(e.email) === normalize(p.email)) ||
+        (e.nim && p.nim && normalize(e.nim) === normalize(p.nim))
+      );
 
-  const mediaGeralFormacao = useMemo(() => {
-    const medias = recrutasPreparados
-      .map((r) => {
-        const av = r?.avaliacao || {};
-        const valores = [av.disciplina, av.radio, av.legal, av.conducao, av.postura, av.expediente]
-          .map((v) => Number(v))
-          .filter((v) => !Number.isNaN(v) && v > 0);
-        if (!valores.length) return null;
-        return valores.reduce((a, b) => a + b, 0) / valores.length;
-      })
-      .filter((v) => v !== null);
-    if (!medias.length) return "Sem nota";
-    return (medias.reduce((a, b) => a + b, 0) / medias.length).toFixed(1) + "/10";
-  }, [recrutasPreparados]);
+      if (ficha?.id) usados.add(ficha.id);
 
-  const moduloMaisEmFalta = useMemo(() => {
-    const contagem = {};
-    recrutasPreparados.forEach((r) => {
-      Object.entries(r.modulos || {}).forEach(([nome, concluido]) => {
-        if (!concluido) contagem[nome] = (contagem[nome] || 0) + 1;
+      lista.push({
+        ...(ficha || {}),
+        profile_id: p.id,
+        email: ficha?.email || p.email || "",
+        nome: ficha?.nome || p.nome || "Sem nome",
+        nim: ficha?.nim || p.nim || "",
+        posto: ficha?.posto || p.cargo || "",
+        estado: ficha?.estado || "Ativo",
+        data_inicio_psa: ficha?.data_inicio_psa || "",
+        especialidades: Array.isArray(ficha?.especialidades) ? ficha.especialidades : [],
+        observacoes: ficha?.observacoes || "",
+        origem: ficha?.origem || "conta",
+        temConta: true,
+        efetivo_id: ficha?.id || null,
       });
     });
-    const ordenado = Object.entries(contagem).sort((a, b) => b[1] - a[1]);
-    return ordenado[0] ? `${ordenado[0][0]} (${ordenado[0][1]})` : "Sem módulos em falta";
-  }, [recrutasPreparados]);
 
-  async function criarRecruta() {
-    if (!form.nome.trim()) {
-      alert("Indica pelo menos o nome do candidato/guarda provisório.");
+    efetivo.forEach((e) => {
+      if (usados.has(e.id)) return;
+      lista.push({
+        ...e,
+        efetivo_id: e.id,
+        temConta: false,
+        origem: e.origem || "manual",
+        especialidades: Array.isArray(e.especialidades) ? e.especialidades : [],
+      });
+    });
+
+    return lista;
+  }
+
+  const militares = montarMilitares();
+
+  const estatisticas = useMemo(() => {
+    const ativos = militares.filter((m) => m.estado === "Ativo").length;
+    const inativos = militares.filter((m) => m.estado === "Inativo").length;
+    const suspensos = militares.filter((m) => m.estado === "Suspenso").length;
+    const ausentes = militares.filter((m) => ausenciaAtiva(m)).length;
+    return { total: militares.length, ativos, inativos, suspensos, ausentes };
+  }, [perfis, efetivo, ausencias]);
+
+  const filtrados = useMemo(() => {
+    const q = normalize(pesquisa);
+    return militares
+      .filter((m) => filtro === "Todos" || m.estado === filtro || (filtro === "Ausentes" && ausenciaAtiva(m)))
+      .filter((m) => !q || normalize(`${m.nome} ${m.nim} ${m.posto} ${m.email} ${(m.especialidades || []).join(" ")}`).includes(q))
+      .sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || "")));
+  }, [perfis, efetivo, ausencias, filtro, pesquisa]);
+
+  const selecionado = filtrados.find((m) => chaveMilitar(m) === selecionadoKey) || filtrados[0] || null;
+
+  function ausenciasDoMilitar(m) {
+    const id = m?.efetivo_id || m?.id;
+    if (!id) return [];
+    return ausencias.filter((a) => a.efetivo_id === id);
+  }
+
+  function ausenciaAtiva(m) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    return ausenciasDoMilitar(m).some((a) => a.data_inicio <= hoje && a.data_fim >= hoje);
+  }
+
+  function ausenciaAtualTexto(m) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const atual = ausenciasDoMilitar(m).find((a) => a.data_inicio <= hoje && a.data_fim >= hoje);
+    if (!atual) return "Sem ausência ativa";
+    return `${atual.tipo || "Ausência"} até ${atual.data_fim}${atual.motivo ? ` — ${atual.motivo}` : ""}`;
+  }
+
+  function estadoClasse(estado) {
+    if (estado === "Ativo") return "bg-emerald-500/15 border-emerald-500/30 text-emerald-200";
+    if (estado === "Suspenso") return "bg-red-500/15 border-red-500/30 text-red-200";
+    return "bg-slate-500/15 border-slate-500/30 text-slate-200";
+  }
+
+  async function garantirFichaEfetivo(m) {
+    if (m.efetivo_id || m.id) return m.efetivo_id || m.id;
+    if (!canGerir) {
+      alert("Só Admin Formação pode criar/atualizar fichas do efetivo.");
+      return null;
+    }
+
+    const payload = {
+      profile_id: m.profile_id || null,
+      email: m.email || null,
+      nome: m.nome || "Sem nome",
+      nim: m.nim || null,
+      posto: m.posto || null,
+      estado: m.estado || "Ativo",
+      data_inicio_psa: m.data_inicio_psa || null,
+      especialidades: m.especialidades || [],
+      observacoes: m.observacoes || "",
+      origem: m.temConta ? "conta" : "manual",
+      criado_por: user?.id || null,
+    };
+
+    const { data, error } = await supabase.from("efetivo_psa").insert(payload).select().single();
+
+    if (error) {
+      console.error("Erro ao criar ficha do efetivo:", error);
+
+      const match = efetivo.find((e) =>
+        (payload.nim && e.nim && normalize(payload.nim) === normalize(e.nim)) ||
+        (payload.email && e.email && normalize(payload.email) === normalize(e.email))
+      );
+
+      if (match) return match.id;
+
+      alert("Não foi possível criar a ficha do efetivo. Pode já existir um militar com o mesmo NIM/email.");
+      return null;
+    }
+
+    await carregarEfetivo();
+    return data.id;
+  }
+
+  async function atualizarMilitar(m, patch) {
+    if (!canGerir) {
+      alert("Só Admin Formação pode alterar o efetivo.");
+      return;
+    }
+
+    const id = await garantirFichaEfetivo(m);
+    if (!id) return;
+
+    const { error } = await supabase.from("efetivo_psa").update(patch).eq("id", id);
+
+    if (error) {
+      console.error("Erro ao atualizar militar:", error);
+      alert("Não foi possível atualizar o militar.");
+      return;
+    }
+
+    await carregarEfetivo();
+  }
+
+  async function criarMilitarManual() {
+    if (!canGerir) {
+      alert("Só Admin Formação pode adicionar militares manualmente.");
+      return;
+    }
+
+    if (!novo.nome.trim()) {
+      alert("Indica pelo menos o nome do militar.");
+      return;
+    }
+
+    const nimNormalizado = normalize(novo.nim);
+    const emailNormalizado = normalize(novo.email);
+
+    const existente = militares.find((m) =>
+      (nimNormalizado && m.nim && normalize(m.nim) === nimNormalizado) ||
+      (emailNormalizado && m.email && normalize(m.email) === emailNormalizado)
+    );
+
+    if (existente) {
+      alert("Já existe um militar com esse NIM/email. Vou selecionar o registo existente.");
+      setSelecionadoKey(chaveMilitar(existente));
       return;
     }
 
     const { data, error } = await supabase
-      .from("recrutamento_candidatos")
+      .from("efetivo_psa")
       .insert({
-        nome: form.nome.trim(),
-        nim: form.nim.trim() || null,
-        contacto: form.contacto.trim() || null,
-        discord: form.discord.trim() || null,
-        estado: form.estado,
-        formador: form.formador.trim() || perfil?.nome || null,
-        observacoes: form.observacoes.trim() || null,
+        nome: novo.nome.trim(),
+        nim: novo.nim.trim() || null,
+        posto: novo.posto.trim() || null,
+        email: novo.email.trim() || null,
+        estado: novo.estado,
+        data_inicio_psa: novo.data_inicio_psa || null,
+        especialidades: novo.especialidades || [],
+        observacoes: novo.observacoes || "",
+        origem: "manual",
         criado_por: user?.id || null,
       })
       .select()
       .single();
 
     if (error) {
-      console.error("Erro ao criar candidato:", error);
-      alert("Erro ao criar candidato/guarda provisório.");
+      console.error("Erro ao adicionar militar:", error);
+      alert("Não foi possível adicionar. Confirma se já existe esse NIM/email.");
       return;
     }
 
-    setForm({ nome: "", nim: "", contacto: "", discord: "", estado: "Candidato", formador: perfil?.nome || "", observacoes: "" });
-    setSelecionadoId(data.id);
-    await carregarDadosFormacao();
+    setNovo({ nome: "", nim: "", posto: "", email: "", estado: "Ativo", data_inicio_psa: "", especialidades: [], observacoes: "" });
+    await carregarEfetivo();
+    setSelecionadoKey(`manual-${data.id}`);
   }
 
-  async function atualizarRecruta(id, patch) {
-    setRecrutas((atuais) => atuais.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-
-    const camposPermitidos = ["nome", "nim", "contacto", "discord", "estado", "formador", "observacoes"];
-    const payload = Object.fromEntries(Object.entries(patch).filter(([key]) => camposPermitidos.includes(key)));
-    if (!Object.keys(payload).length) return;
-
-    const { error } = await supabase.from("recrutamento_candidatos").update(payload).eq("id", id);
-    if (error) {
-      console.error("Erro ao atualizar candidato:", error);
-      alert("Erro ao atualizar candidato.");
-      await carregarDadosFormacao();
-    }
-  }
-
-  async function toggleModulo(id, moduloNome) {
-    const modulo = modulosAtivos.find((m) => m.nome === moduloNome);
-    if (!modulo || String(modulo.id).startsWith("local-")) {
-      alert("Módulo não encontrado no Supabase.");
+  async function adicionarAusencia(m) {
+    if (!novaAusencia.data_inicio || !novaAusencia.data_fim) {
+      alert("Indica a data de início e fim da ausência.");
       return;
     }
 
-    const jaConcluido = !!selecionado?.modulos?.[moduloNome];
+    const id = await garantirFichaEfetivo(m);
+    if (!id) return;
 
-    if (jaConcluido) {
-      const { error } = await supabase
-        .from("formacao_modulos_concluidos")
-        .delete()
-        .eq("candidato_id", id)
-        .eq("modulo_id", modulo.id);
-
-      if (error) {
-        console.error("Erro ao remover módulo:", error);
-        alert("Erro ao remover módulo concluído.");
-        return;
-      }
-    } else {
-      const { error } = await supabase
-        .from("formacao_modulos_concluidos")
-        .upsert({
-          candidato_id: id,
-          modulo_id: modulo.id,
-          concluido: true,
-          data_conclusao: new Date().toISOString(),
-        }, { onConflict: "candidato_id,modulo_id" });
-
-      if (error) {
-        console.error("Erro ao concluir módulo:", error);
-        alert("Erro ao marcar módulo como concluído.");
-        return;
-      }
-    }
-
-    await carregarDadosFormacao();
-  }
-
-  function atualizarAvaliacao(id, campo, valor) {
-    setAvaliacoes((atuais) => {
-      const existentes = atuais.filter((a) => a.candidato_id === id);
-      const ultima = existentes[0];
-
-      if (!ultima) {
-        return [{ candidato_id: id, [campo]: valor, parecer: "Em avaliação", created_at: new Date().toISOString() }, ...atuais];
-      }
-
-      return atuais.map((a) => (a.id === ultima.id ? { ...a, [campo]: valor } : a));
+    const { error } = await supabase.from("efetivo_ausencias").insert({
+      efetivo_id: id,
+      tipo: novaAusencia.tipo || "Ausência",
+      data_inicio: novaAusencia.data_inicio,
+      data_fim: novaAusencia.data_fim,
+      motivo: novaAusencia.motivo || "",
+      criado_por: user?.id || null,
     });
-  }
-
-  async function guardarAvaliacao(id) {
-    const r = recrutasPreparados.find((item) => item.id === id);
-    if (!r) return;
-
-    const av = r.avaliacao || {};
-    const payload = {
-      candidato_id: id,
-      avaliador_id: user?.id || null,
-      disciplina: av.disciplina === "" ? null : Number(av.disciplina),
-      radio: av.radio === "" ? null : Number(av.radio),
-      legal: av.legal === "" ? null : Number(av.legal),
-      conducao: av.conducao === "" ? null : Number(av.conducao),
-      postura: av.postura === "" ? null : Number(av.postura),
-      expediente: av.expediente === "" ? null : Number(av.expediente),
-      parecer: av.parecer || "Em avaliação",
-      observacoes: av.observacoes || null,
-    };
-
-    const { error } = await supabase.from("formacao_avaliacoes").insert(payload);
 
     if (error) {
-      console.error("Erro ao guardar avaliação:", error);
-      alert("Erro ao guardar avaliação.");
+      console.error("Erro ao adicionar ausência:", error);
+      alert("Não foi possível adicionar ausência.");
       return;
     }
 
-    alert("Avaliação guardada com sucesso.");
-    await carregarDadosFormacao();
+    setNovaAusencia({ tipo: "Ausência", data_inicio: "", data_fim: "", motivo: "" });
+    await carregarEfetivo();
   }
 
-  async function apagarRecruta(id) {
-    if (!isAdminFormacao) {
-      alert("Apenas administradores da formação podem apagar registos.");
+  async function apagarAusencia(id) {
+    if (!canGerir) {
+      alert("Só Admin Formação pode apagar ausências.");
       return;
     }
 
-    if (!confirm("Queres apagar este registo de recrutamento/formação?")) return;
+    if (!confirm("Queres apagar esta ausência?")) return;
 
-    const { error } = await supabase.from("recrutamento_candidatos").delete().eq("id", id);
+    const { error } = await supabase.from("efetivo_ausencias").delete().eq("id", id);
+
     if (error) {
-      console.error("Erro ao apagar candidato:", error);
-      alert("Erro ao apagar registo.");
+      console.error("Erro ao apagar ausência:", error);
+      alert("Não foi possível apagar ausência.");
       return;
     }
 
-    if (selecionadoId === id) setSelecionadoId(null);
-    await carregarDadosFormacao();
+    await carregarEfetivo();
   }
 
-  function mediaAvaliacao(r) {
-    const av = r?.avaliacao || {};
-    const valores = [av.disciplina, av.radio, av.legal, av.conducao, av.postura, av.expediente]
-      .map((v) => Number(v))
-      .filter((v) => !Number.isNaN(v) && v > 0);
-    if (!valores.length) return "Sem nota";
-    return (valores.reduce((a, b) => a + b, 0) / valores.length).toFixed(1) + "/10";
+  function toggleEspecialidadeForm(esp) {
+    setNovo((atual) => ({
+      ...atual,
+      especialidades: atual.especialidades.includes(esp)
+        ? atual.especialidades.filter((e) => e !== esp)
+        : [...atual.especialidades, esp],
+    }));
   }
 
-  function progressoModulos(r) {
-    const mods = Object.values(r?.modulos || {});
-    if (!mods.length) return "0/0";
-    return `${mods.filter(Boolean).length}/${mods.length}`;
+  async function toggleEspecialidadeMilitar(m, esp) {
+    const atuais = Array.isArray(m.especialidades) ? m.especialidades : [];
+    const especialidades = atuais.includes(esp) ? atuais.filter((e) => e !== esp) : [...atuais, esp];
+    await atualizarMilitar(m, { especialidades });
   }
 
-  function gerarResumoRecruta(r) {
-    if (!r) return "";
-    const feitos = Object.entries(r.modulos || {}).filter(([, feito]) => feito).map(([nome]) => nome);
-    const pendentes = Object.entries(r.modulos || {}).filter(([, feito]) => !feito).map(([nome]) => nome);
-    return `AVALIAÇÃO CFG PSA\n\nMilitar: ${r.nome}${r.nim ? `\nNIM: ${r.nim}` : ""}\nEstado: ${r.estado}\nFormador/Avaliador: ${r.formador || "Não definido"}\n\nMódulos concluídos:\n${feitos.length ? feitos.map((m) => `✓ ${m}`).join("\n") : "[nenhum]"}\n\nMódulos pendentes:\n${pendentes.length ? pendentes.map((m) => `✗ ${m}`).join("\n") : "[nenhum]"}\n\nMédia: ${mediaAvaliacao(r)}\nParecer: ${r.avaliacao?.parecer || "Em avaliação"}\n\nObservações:\n${r.avaliacao?.observacoes || r.observacoes || "[sem observações]"}`;
-  }
+  function fichaMilitar(m) {
+    if (!m) return "";
+    return `FICHA DE EFETIVO PSA
 
-  function gerarRelatorioFinalCFG(r) {
-    if (!r) return "";
-    const feitos = Object.entries(r.modulos || {}).filter(([, feito]) => feito).map(([nome]) => nome);
-    const pendentes = Object.entries(r.modulos || {}).filter(([, feito]) => !feito).map(([nome]) => nome);
-    const historico = r.historicoAvaliacoes || [];
-    const avaliacoesTexto = historico.length
-      ? historico.map((av, index) => {
-          const data = av.created_at ? new Date(av.created_at).toLocaleString("pt-PT") : "Sem data";
-          return `Avaliação ${historico.length - index} — ${data}\nDisciplina: ${av.disciplina ?? "-"} | Rádio: ${av.radio ?? "-"} | Legal: ${av.legal ?? "-"} | Condução: ${av.conducao ?? "-"} | Postura: ${av.postura ?? "-"} | Expediente: ${av.expediente ?? "-"}\nParecer: ${av.parecer || "Em avaliação"}${av.observacoes ? `\nObservações: ${av.observacoes}` : ""}`;
-        }).join("\n\n")
-      : "[sem avaliações guardadas]";
+Nome: ${m.nome || "[sem nome]"}
+NIM: ${m.nim || "[sem NIM]"}
+Posto: ${m.posto || "[sem posto]"}
+Email: ${m.email || "[sem email]"}
+Estado: ${m.estado || "Ativo"}
+Data de início na PSA: ${m.data_inicio_psa || "[não indicada]"}
+Origem: ${m.temConta ? "Conta do sistema" : "Adicionado manualmente"}
 
-    return `RELATÓRIO FINAL CFG — PSA\n\nMilitar: ${r.nome}${r.nim ? `\nNIM: ${r.nim}` : ""}\nEstado atual: ${r.estado}\nContacto: ${r.contacto || "Não indicado"}\nDiscord: ${r.discord || "Não indicado"}\n\nMÓDULOS CONCLUÍDOS\n${feitos.length ? feitos.map((m) => `✓ ${m}`).join("\n") : "[nenhum]"}\n\nMÓDULOS EM FALTA\n${pendentes.length ? pendentes.map((m) => `✗ ${m}`).join("\n") : "Nenhum"}\n\nMÉDIA FINAL\n${mediaAvaliacao(r)}\n\nHISTÓRICO DE AVALIAÇÕES\n${avaliacoesTexto}\n\nPARECER FINAL\n${r.avaliacao?.parecer || "Em avaliação"}\n\nOBSERVAÇÕES FINAIS\n${r.avaliacao?.observacoes || r.observacoes || "[sem observações]"}\n\nRelatório elaborado no sistema PSA Autos.`;
-  }
+Especialidades:
+${m.especialidades?.length ? m.especialidades.map((e) => `✓ ${e}`).join("\n") : "[sem especialidades registadas]"}
 
-  function classeEstadoFormacao(estado) {
-    if (estado === "Apto" || estado === "Guarda Efetivo") return "bg-emerald-500/15 border-emerald-500/25 text-emerald-200";
-    if (estado === "Não apto") return "bg-red-500/15 border-red-500/25 text-red-200";
-    if (estado === "Guarda Provisório" || estado === "Em formação") return "bg-sky-500/15 border-sky-500/25 text-sky-200";
-    return "bg-amber-500/15 border-amber-500/25 text-amber-200";
-  }
+Ausência atual:
+${ausenciaAtualTexto(m)}
 
-  if (!temAcesso) {
-    return (
-      <section className="rounded-[1.7rem] border border-red-500/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-xl font-bold text-red-200">Sem autorização</div>
-            <p className="text-sm text-slate-400">O teu perfil ainda não tem permissão para aceder ao módulo de Recrutamento/Formação.</p>
-          </div>
-          <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
-        </div>
-      </section>
-    );
+Observações:
+${m.observacoes || "[sem observações]"}`;
   }
 
   return (
     <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xl font-bold">Recrutamento / Formação</div>
-          <p className="text-sm text-slate-400">Módulo ligado ao Supabase para gerir candidatos, guardas provisórios, módulos dados e avaliações partilhadas.</p>
+          <div className="text-xl font-bold">Efetivo PSA</div>
+          <p className="text-sm text-slate-400">Quadro de militares, especialidades e ausências. Militares com login aparecem automaticamente; os restantes podem ser adicionados manualmente pelo Admin Formação.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={carregarDadosFormacao} disabled={loadingFormacao} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition disabled:opacity-50">{loadingFormacao ? "A carregar..." : "Atualizar"}</button>
+          <button onClick={carregarEfetivo} disabled={loading} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition disabled:opacity-50">{loading ? "A carregar..." : "Atualizar"}</button>
           <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <Kpi icon={<Shield />} label="Registos" value={totalRecrutas} />
-        <Kpi icon={<FileText />} label="Candidatos" value={candidatos} />
-        <Kpi icon={<Calculator />} label="Em formação" value={emFormacao} />
-        <Kpi icon={<Star />} label="Aptos" value={aptos} />
-        <Kpi icon={<Trash2 />} label="Não aptos" value={naoAptos} />
-        <Kpi icon={<Calculator />} label="Média geral" value={mediaGeralFormacao} />
+      {erro && <div className="rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 px-4 py-3 text-sm">{erro}</div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <Kpi icon={<Shield />} label="Total efetivo" value={estatisticas.total} />
+        <Kpi icon={<Star />} label="Ativos" value={estatisticas.ativos} />
+        <Kpi icon={<FileText />} label="Inativos" value={estatisticas.inativos} />
+        <Kpi icon={<Zap />} label="Suspensos" value={estatisticas.suspensos} />
+        <Kpi icon={<Calculator />} label="Ausentes" value={estatisticas.ausentes} />
       </div>
 
-      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4">
-        <div className="text-sm text-slate-400 font-bold">Módulo mais em falta</div>
-        <div className="mt-1 text-xl font-black text-[#d4af37]">{moduloMaisEmFalta}</div>
-      </div>
+      {canGerir && (
+        <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
+          <div className="text-lg font-black text-[#d4af37]">Adicionar militar manualmente</div>
+          <p className="text-sm text-slate-400">Usa apenas para militares que ainda não entraram no sistema. Se o NIM/email já existir, o sistema não duplica.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="Nome" value={novo.nome} onChange={(v) => setNovo({ ...novo, nome: v })} />
+            <Field label="NIM" value={novo.nim} onChange={(v) => setNovo({ ...novo, nim: v })} />
+            <Field label="Posto" value={novo.posto} onChange={(v) => setNovo({ ...novo, posto: v })} />
+            <Field label="Email" value={novo.email} onChange={(v) => setNovo({ ...novo, email: v })} />
+            <Field label="Data de início na PSA" value={novo.data_inicio_psa} onChange={(v) => setNovo({ ...novo, data_inicio_psa: v })} />
+            <SelectField label="Estado" value={novo.estado} onChange={(v) => setNovo({ ...novo, estado: v })} options={ESTADOS_EFETIVO} />
+          </div>
+          <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div className="font-black mb-2 text-[#d4af37]">Especialidades</div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              {ESPECIALIDADES_PSA.map((esp) => (
+                <label key={esp} className="flex items-center gap-2 rounded-xl bg-[#0e1c11] border border-white/10 px-3 py-2 text-sm">
+                  <input type="checkbox" checked={novo.especialidades.includes(esp)} onChange={() => toggleEspecialidadeForm(esp)} />
+                  <span>{esp}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <TextArea label="Observações" value={novo.observacoes} onChange={(v) => setNovo({ ...novo, observacoes: v })} placeholder="Notas internas sobre o militar..." rows={3} />
+          <button onClick={criarMilitarManual} className="rounded-2xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-5 py-3 text-sm font-black shadow-lg shadow-[#d4af37]/20 transition">Adicionar militar</button>
+        </div>
+      )}
 
       <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
-        <div className="text-lg font-black text-[#d4af37]">Novo candidato / guarda provisório</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Nome" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
-          <Field label="NIM" value={form.nim} onChange={(v) => setForm({ ...form, nim: v })} />
-          <Field label="Contacto" value={form.contacto} onChange={(v) => setForm({ ...form, contacto: v })} />
-          <Field label="Discord" value={form.discord} onChange={(v) => setForm({ ...form, discord: v })} />
-          <SelectField label="Estado" value={form.estado} onChange={(v) => setForm({ ...form, estado: v })} options={["Candidato", "Em análise", "Guarda Provisório", "Em formação", "Apto", "Não apto", "Guarda Efetivo"]} />
-          <Field label="Formador/Avaliador" value={form.formador} onChange={(v) => setForm({ ...form, formador: v })} />
+        <div className="text-lg font-black">Filtros</div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
+          <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nome, NIM, posto, email ou especialidade..." className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition" />
+          <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition">
+            {["Todos", "Ativo", "Inativo", "Suspenso", "Ausentes"].map((op) => <option key={op}>{op}</option>)}
+          </select>
         </div>
-        <TextArea label="Observações iniciais" value={form.observacoes} onChange={(v) => setForm({ ...form, observacoes: v })} placeholder="Ex: disponibilidade, experiência, postura na entrevista..." rows={3} />
-        <button onClick={criarRecruta} className="rounded-2xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-5 py-3 text-sm font-black shadow-lg shadow-[#d4af37]/20 transition">Adicionar registo</button>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
         <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-black">Lista de candidatos / provisórios</div>
-            <div className="flex flex-wrap gap-2">
-              {["Todos", "Candidatos", "Guardas Provisórios", "Aptos", "Não aptos"].map((f) => (
-                <button key={f} onClick={() => setFiltroFormacao(f)} className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${filtroFormacao === f ? "bg-[#d4af37] text-[#151406]" : "bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200"}`}>
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-          {loadingFormacao ? (
-            <p className="text-slate-400 text-sm">A carregar registos...</p>
-          ) : recrutasFiltrados.length === 0 ? (
-            <p className="text-slate-400 text-sm">Não existem registos neste filtro.</p>
+          <div className="text-lg font-black">Lista de militares</div>
+          {loading ? (
+            <p className="text-slate-400">A carregar efetivo...</p>
+          ) : filtrados.length === 0 ? (
+            <p className="text-slate-400 text-sm">Não existem militares para mostrar.</p>
           ) : (
-            <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
-              {recrutasFiltrados.map((r) => (
-                <button key={r.id} onClick={() => setSelecionadoId(r.id)} className={`w-full text-left rounded-2xl border p-3 transition ${selecionado?.id === r.id ? "border-[#d4af37]/70 bg-[#1a291b]" : "border-white/10 bg-[#07110a]/80 hover:border-[#d4af37]/30"}`}>
+            <div className="space-y-2 max-h-[620px] overflow-auto pr-1">
+              {filtrados.map((m) => (
+                <button key={chaveMilitar(m)} onClick={() => setSelecionadoKey(chaveMilitar(m))} className={`w-full text-left rounded-2xl border p-3 transition ${selecionado && chaveMilitar(selecionado) === chaveMilitar(m) ? "border-[#d4af37]/70 bg-[#1a291b]" : "border-white/10 bg-[#07110a]/80 hover:border-[#d4af37]/30"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-black">{r.nome}</div>
-                      <div className="text-xs text-slate-400">{r.nim ? `NIM ${r.nim} · ` : ""}{r.estado}</div>
-                      <div className="text-xs text-slate-400 mt-1">Módulos: {progressoModulos(r)} · Média: {mediaAvaliacao(r)}</div>
+                      <div className="font-black">{m.nome}</div>
+                      <div className="text-xs text-slate-400">{m.nim ? `NIM ${m.nim} · ` : ""}{m.posto || "Sem posto"}</div>
+                      <div className="text-xs text-slate-500 mt-1">{m.temConta ? "Conta do sistema" : "Manual"} · {ausenciaAtualTexto(m)}</div>
                     </div>
-                    <span className={`rounded-lg border px-2 py-1 text-xs font-bold ${classeEstadoFormacao(r.estado)}`}>{r.estado}</span>
+                    <span className={`rounded-lg border px-2 py-1 text-xs font-bold ${estadoClasse(m.estado)}`}>{m.estado}</span>
                   </div>
+                  {m.especialidades?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {m.especialidades.map((e) => <span key={e} className="rounded-md bg-[#d4af37]/10 border border-[#d4af37]/20 text-[#f3d889] px-2 py-0.5 text-[11px]">{e}</span>)}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
@@ -1877,100 +1868,67 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
 
         <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-4">
           {!selecionado ? (
-            <p className="text-slate-400">Seleciona um registo para avaliar.</p>
+            <p className="text-slate-400">Seleciona um militar.</p>
           ) : (
             <>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-xl font-black">{selecionado.nome}</div>
-                  <div className="text-sm text-slate-400">Criado em {selecionado.created_at_formatado} por {selecionado.criado_por_nome}</div>
+                  <div className="text-sm text-slate-400">{selecionado.email || "Sem email"} · {selecionado.temConta ? "Conta do sistema" : "Adicionado manualmente"}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => copy(gerarResumoRecruta(selecionado), "resumo de formação")} className="rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm font-bold transition">Copiar resumo</button>
-                  <button onClick={() => copy(gerarRelatorioFinalCFG(selecionado), "relatório final CFG")} className="rounded-xl bg-[#d4af37] hover:bg-[#e1bf58] text-[#151406] px-3 py-2 text-sm font-black transition">Relatório Final CFG</button>
-                  {isAdminFormacao && <button onClick={() => apagarRecruta(selecionado.id)} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Apagar</button>}
+                  <button onClick={() => copy(fichaMilitar(selecionado), "ficha do efetivo")} className="rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm font-bold transition">Copiar ficha</button>
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
-                <div className="font-black mb-3 text-[#d4af37]">Ficha individual</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-slate-300">
-                  <div><b className="text-white">Estado:</b> <span className={`ml-1 rounded-lg border px-2 py-1 text-xs font-bold ${classeEstadoFormacao(selecionado.estado)}`}>{selecionado.estado}</span></div>
-                  <div><b className="text-white">NIM:</b> {selecionado.nim || "Não indicado"}</div>
-                  <div><b className="text-white">Contacto:</b> {selecionado.contacto || "Não indicado"}</div>
-                  <div><b className="text-white">Discord:</b> {selecionado.discord || "Não indicado"}</div>
-                  <div><b className="text-white">Módulos:</b> {progressoModulos(selecionado)}</div>
-                  <div><b className="text-white">Média:</b> {mediaAvaliacao(selecionado)}</div>
-                </div>
-                {selecionado.observacoes && (
-                  <div className="mt-3 rounded-xl bg-[#07110a]/80 border border-white/10 p-3 text-sm text-slate-300 whitespace-pre-wrap">
-                    <b className="text-white">Observações iniciais:</b> {selecionado.observacoes}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <SelectField label="Estado" value={selecionado.estado} onChange={(v) => atualizarRecruta(selecionado.id, { estado: v })} options={["Candidato", "Em análise", "Guarda Provisório", "Em formação", "Apto", "Não apto", "Guarda Efetivo"]} />
-                <Field label="Formador/Avaliador" value={selecionado.formador || ""} onChange={(v) => atualizarRecruta(selecionado.id, { formador: v })} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Field label="Nome" value={selecionado.nome || ""} onChange={(v) => atualizarMilitar(selecionado, { nome: v })} />
+                <Field label="NIM" value={selecionado.nim || ""} onChange={(v) => atualizarMilitar(selecionado, { nim: v || null })} />
+                <Field label="Posto" value={selecionado.posto || ""} onChange={(v) => atualizarMilitar(selecionado, { posto: v })} />
+                <SelectField label="Estado" value={selecionado.estado || "Ativo"} onChange={(v) => atualizarMilitar(selecionado, { estado: v })} options={ESTADOS_EFETIVO} />
+                <Field label="Data de início na PSA" value={selecionado.data_inicio_psa || ""} onChange={(v) => atualizarMilitar(selecionado, { data_inicio_psa: v || null })} />
+                <Field label="Email" value={selecionado.email || ""} onChange={(v) => atualizarMilitar(selecionado, { email: v || null })} />
               </div>
 
               <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
-                <div className="font-black mb-3 text-[#d4af37]">Módulos de formação</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {modulosAtivos.map((modulo) => (
-                    <label key={modulo.id} className="flex items-center gap-2 rounded-xl bg-[#0e1c11] border border-white/10 px-3 py-2 text-sm">
-                      <input type="checkbox" checked={!!selecionado.modulos?.[modulo.nome]} onChange={() => toggleModulo(selecionado.id, modulo.nome)} />
-                      <span>{modulo.nome}</span>
+                <div className="font-black mb-3 text-[#d4af37]">Especialidades</div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  {ESPECIALIDADES_PSA.map((esp) => (
+                    <label key={esp} className="flex items-center gap-2 rounded-xl bg-[#0e1c11] border border-white/10 px-3 py-2 text-sm">
+                      <input type="checkbox" disabled={!canGerir} checked={!!selecionado.especialidades?.includes(esp)} onChange={() => toggleEspecialidadeMilitar(selecionado, esp)} />
+                      <span>{esp}</span>
                     </label>
                   ))}
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-black/20 border border-white/10 p-3 space-y-3">
-                <div className="font-black text-[#d4af37]">Avaliação</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <Field label="Disciplina" value={selecionado.avaliacao?.disciplina || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "disciplina", v)} />
-                  <Field label="Rádio" value={selecionado.avaliacao?.radio || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "radio", v)} />
-                  <Field label="Conhecimento legal" value={selecionado.avaliacao?.legal || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "legal", v)} />
-                  <Field label="Condução" value={selecionado.avaliacao?.conducao || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "conducao", v)} />
-                  <Field label="Postura" value={selecionado.avaliacao?.postura || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "postura", v)} />
-                  <Field label="Autos/Expediente" value={selecionado.avaliacao?.expediente || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "expediente", v)} />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <SelectField label="Parecer" value={selecionado.avaliacao?.parecer || "Em avaliação"} onChange={(v) => atualizarAvaliacao(selecionado.id, "parecer", v)} options={["Em avaliação", "Apto", "Não apto", "Necessita nova avaliação"]} />
-                  <div className="rounded-2xl bg-[#07110a]/80 border border-white/10 p-3">
-                    <div className="text-sm text-slate-400 font-bold">Média atual</div>
-                    <div className="text-2xl font-black">{mediaAvaliacao(selecionado)}</div>
-                  </div>
-                </div>
-                <TextArea label="Observações da avaliação" value={selecionado.avaliacao?.observacoes || ""} onChange={(v) => atualizarAvaliacao(selecionado.id, "observacoes", v)} placeholder="Pontos fortes, pontos a melhorar, ocorrências durante formação..." rows={4} />
-                <button onClick={() => guardarAvaliacao(selecionado.id)} className="rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Guardar avaliação</button>
-              </div>
+              <TextArea label="Observações internas" value={selecionado.observacoes || ""} onChange={(v) => atualizarMilitar(selecionado, { observacoes: v })} placeholder="Notas internas sobre o militar..." rows={3} />
 
               <div className="rounded-2xl bg-black/20 border border-white/10 p-3 space-y-3">
-                <div className="font-black text-[#d4af37]">Histórico de avaliações</div>
-                {selecionado.historicoAvaliacoes.length === 0 ? (
-                  <p className="text-sm text-slate-400">Ainda não existem avaliações guardadas.</p>
-                ) : (
-                  <div className="space-y-2 max-h-[260px] overflow-auto pr-1">
-                    {selecionado.historicoAvaliacoes.map((av, index) => (
-                      <div key={av.id || index} className="rounded-xl bg-[#07110a]/80 border border-white/10 p-3 text-sm text-slate-300">
-                        <div className="font-black text-white">Avaliação #{selecionado.historicoAvaliacoes.length - index}</div>
-                        <div className="text-xs text-slate-400">{av.created_at ? new Date(av.created_at).toLocaleString("pt-PT") : "Sem data"}</div>
-                        <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-1">
-                          <div>Disciplina: <b>{av.disciplina ?? "-"}</b></div>
-                          <div>Rádio: <b>{av.radio ?? "-"}</b></div>
-                          <div>Legal: <b>{av.legal ?? "-"}</b></div>
-                          <div>Condução: <b>{av.conducao ?? "-"}</b></div>
-                          <div>Postura: <b>{av.postura ?? "-"}</b></div>
-                          <div>Expediente: <b>{av.expediente ?? "-"}</b></div>
+                <div className="font-black text-[#d4af37]">Ausências</div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <SelectField label="Tipo" value={novaAusencia.tipo} onChange={(v) => setNovaAusencia({ ...novaAusencia, tipo: v })} options={["Ausência", "Licença", "Baixa", "Suspensão", "Outro"]} />
+                  <Field label="Data início" value={novaAusencia.data_inicio} onChange={(v) => setNovaAusencia({ ...novaAusencia, data_inicio: v })} />
+                  <Field label="Data fim" value={novaAusencia.data_fim} onChange={(v) => setNovaAusencia({ ...novaAusencia, data_fim: v })} />
+                  <Field label="Motivo" value={novaAusencia.motivo} onChange={(v) => setNovaAusencia({ ...novaAusencia, motivo: v })} />
+                </div>
+                <button onClick={() => adicionarAusencia(selecionado)} className="rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-3 text-sm font-black shadow-lg shadow-emerald-700/20 transition">Adicionar ausência</button>
+
+                <div className="space-y-2">
+                  {ausenciasDoMilitar(selecionado).length === 0 ? (
+                    <p className="text-sm text-slate-400">Sem ausências registadas.</p>
+                  ) : (
+                    ausenciasDoMilitar(selecionado).map((a) => (
+                      <div key={a.id} className="rounded-xl bg-[#07110a]/80 border border-white/10 p-3 text-sm flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="font-bold">{a.tipo || "Ausência"} · {a.data_inicio} até {a.data_fim}</div>
+                          <div className="text-slate-400">{a.motivo || "Sem motivo indicado"}</div>
                         </div>
-                        <div className="mt-2"><b>Parecer:</b> {av.parecer || "Em avaliação"}</div>
-                        {av.observacoes && <div className="mt-1 whitespace-pre-wrap"><b>Obs.:</b> {av.observacoes}</div>}
+                        {canGerir && <button onClick={() => apagarAusencia(a.id)} className="rounded-lg bg-red-500/20 text-red-200 hover:bg-red-500/30 px-2 py-1 text-xs font-bold">Apagar</button>}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -1980,154 +1938,6 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
   );
 }
 
-
-function ModuloAdministracaoPSA({ perfil, user, onClose }) {
-  const [utilizadores, setUtilizadores] = useState([]);
-  const [pesquisa, setPesquisa] = useState("");
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState("");
-
-  useEffect(() => {
-    carregarUtilizadores();
-  }, []);
-
-  async function carregarUtilizadores() {
-    setCarregando(true);
-    setErro("");
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id,email,nome,cargo,nim,can_formacao,can_admin_formacao")
-      .order("nome", { ascending: true });
-
-    setCarregando(false);
-
-    if (error) {
-      console.error("Erro ao carregar utilizadores:", error);
-      setErro("Não foi possível carregar utilizadores. Confirma se existem policies no Supabase para administradores de formação poderem ler a tabela profiles.");
-      return;
-    }
-
-    setUtilizadores(data || []);
-  }
-
-  async function atualizarPermissao(utilizador, campo, valor) {
-    setErro("");
-
-    const patch = { [campo]: valor };
-
-    if (campo === "can_admin_formacao" && valor === true) {
-      patch.can_formacao = true;
-    }
-
-    if (utilizador.id === user?.id && campo === "can_admin_formacao" && valor === false) {
-      const confirmar = confirm("Estás a remover a tua própria permissão de administrador de formação. Queres continuar?");
-      if (!confirmar) return;
-    }
-
-    const { error } = await supabase
-      .from("profiles")
-      .update(patch)
-      .eq("id", utilizador.id);
-
-    if (error) {
-      console.error("Erro ao atualizar permissões:", error);
-      setErro("Não foi possível atualizar permissões. Confirma se a policy de UPDATE na tabela profiles permite can_admin_formacao.");
-      return;
-    }
-
-    setUtilizadores((atuais) => atuais.map((u) => u.id === utilizador.id ? { ...u, ...patch } : u));
-  }
-
-  const filtrados = useMemo(() => {
-    const q = normalize(pesquisa);
-    if (!q) return utilizadores;
-    return utilizadores.filter((u) => normalize(`${u.nome || ""} ${u.email || ""} ${u.cargo || ""} ${u.nim || ""}`).includes(q));
-  }, [utilizadores, pesquisa]);
-
-  const totalFormadores = utilizadores.filter((u) => u.can_formacao).length;
-  const totalAdmins = utilizadores.filter((u) => u.can_admin_formacao).length;
-
-  return (
-    <section className="rounded-[1.7rem] border border-[#d4af37]/20 bg-[#0e1c11]/90 backdrop-blur-xl p-5 shadow-2xl shadow-black/30 space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-xl font-bold">Administração PSA</div>
-          <p className="text-sm text-slate-400">Gestão de permissões para o módulo Recrutamento/Formação.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={carregarUtilizadores} className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-sm font-bold transition">Atualizar</button>
-          <button onClick={onClose} className="rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 px-3 py-2 text-sm font-bold transition">Fechar</button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Kpi icon={<Shield />} label="Utilizadores" value={utilizadores.length} />
-        <Kpi icon={<FileText />} label="Formadores/Avaliadores" value={totalFormadores} />
-        <Kpi icon={<Star />} label="Administradores" value={totalAdmins} />
-      </div>
-
-      {erro && (
-        <div className="rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 px-4 py-3 text-sm whitespace-pre-wrap">{erro}</div>
-      )}
-
-      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4 space-y-3">
-        <div className="text-lg font-black text-[#d4af37]">Permissões de Formação</div>
-        <p className="text-sm text-slate-400">
-          Ativa <b>Formador/Avaliador</b> para quem deve ver e usar a aba Recrutamento/Formação. Ativa <b>Admin Formação</b> apenas para Comando/elementos autorizados a gerir permissões.
-        </p>
-        <input
-          value={pesquisa}
-          onChange={(e) => setPesquisa(e.target.value)}
-          placeholder="Pesquisar por nome, email, cargo ou NIM..."
-          className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition"
-        />
-      </div>
-
-      <div className="rounded-2xl bg-[#07110a]/70 border border-white/10 p-4">
-        {carregando ? (
-          <p className="text-slate-400">A carregar utilizadores...</p>
-        ) : filtrados.length === 0 ? (
-          <p className="text-slate-400">Não foram encontrados utilizadores.</p>
-        ) : (
-          <div className="space-y-2 max-h-[560px] overflow-auto pr-1">
-            {filtrados.map((u) => (
-              <div key={u.id} className="rounded-2xl bg-[#0e1c11]/80 border border-white/10 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="font-black text-white">{u.nome || "Sem nome"}</div>
-                    <div className="text-sm text-slate-400">{u.email || "Sem email"}</div>
-                    <div className="text-xs text-slate-500 mt-1">{u.cargo || "Sem cargo"}{u.nim ? ` · NIM ${u.nim}` : ""}</div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 text-sm">
-                    <label className="flex items-center gap-2 rounded-xl bg-[#07110a] border border-white/10 px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={!!u.can_formacao}
-                        onChange={(e) => atualizarPermissao(u, "can_formacao", e.target.checked)}
-                      />
-                      <span>Formador/Avaliador</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 rounded-xl bg-[#07110a] border border-[#d4af37]/30 px-3 py-2 text-[#f3d889]">
-                      <input
-                        type="checkbox"
-                        checked={!!u.can_admin_formacao}
-                        onChange={(e) => atualizarPermissao(u, "can_admin_formacao", e.target.checked)}
-                      />
-                      <span>Admin Formação</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
 
 function saveLocal(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { console.error("Erro ao guardar no navegador:", error); }
