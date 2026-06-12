@@ -1996,7 +1996,7 @@ function ModuloRecrutamentoFormacao({ perfil, user, onClose }) {
 
 function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
   const ESPECIALIDADES_PSA = ["Trânsito", "UCC", "Meio Aéreo", "GIOE", "PIR", "GIC", "EPG"];
-  const ESTADOS_EFETIVO = ["Ativo", "Inativo", "Suspenso"];
+  const ESTADOS_EFETIVO = ["Ativo", "Suspenso", "Inativo", "Exonerado"];
   const canGerir = !!perfil?.can_admin_formacao;
 
   const [perfis, setPerfis] = useState([]);
@@ -2016,6 +2016,8 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
     data_inicio_psa: "",
     especialidades: [],
     observacoes: "",
+    data_exoneracao: "",
+    motivo_exoneracao: "",
   });
   const [novaAusencia, setNovaAusencia] = useState({
     tipo: "Ausência",
@@ -2080,6 +2082,8 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
         data_inicio_psa: ficha?.data_inicio_psa || "",
         especialidades: Array.isArray(ficha?.especialidades) ? ficha.especialidades : [],
         observacoes: ficha?.observacoes || "",
+        data_exoneracao: ficha?.data_exoneracao || "",
+        motivo_exoneracao: ficha?.motivo_exoneracao || "",
         origem: ficha?.origem || "conta",
         temConta: true,
         efetivo_id: ficha?.id || null,
@@ -2106,8 +2110,9 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
     const ativos = militares.filter((m) => m.estado === "Ativo").length;
     const inativos = militares.filter((m) => m.estado === "Inativo").length;
     const suspensos = militares.filter((m) => m.estado === "Suspenso").length;
+    const exonerados = militares.filter((m) => m.estado === "Exonerado").length;
     const ausentes = militares.filter((m) => ausenciaAtiva(m)).length;
-    return { total: militares.length, ativos, inativos, suspensos, ausentes };
+    return { total: militares.length, ativos, inativos, suspensos, exonerados, ausentes };
   }, [perfis, efetivo, ausencias]);
 
   const filtrados = useMemo(() => {
@@ -2163,6 +2168,7 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
   function estadoClasse(estado) {
     if (estado === "Ativo") return "bg-emerald-500/15 border-emerald-500/30 text-emerald-200";
     if (estado === "Suspenso") return "bg-red-500/15 border-red-500/30 text-red-200";
+    if (estado === "Exonerado") return "bg-purple-500/15 border-purple-500/30 text-purple-200";
     return "bg-slate-500/15 border-slate-500/30 text-slate-200";
   }
 
@@ -2183,6 +2189,8 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
       data_inicio_psa: m.data_inicio_psa || null,
       especialidades: m.especialidades || [],
       observacoes: m.observacoes || "",
+      data_exoneracao: m.data_exoneracao || null,
+      motivo_exoneracao: m.motivo_exoneracao || "",
       origem: m.temConta ? "conta" : "manual",
       criado_por: user?.id || null,
     };
@@ -2263,6 +2271,8 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
         data_inicio_psa: novo.data_inicio_psa || null,
         especialidades: novo.especialidades || [],
         observacoes: novo.observacoes || "",
+        data_exoneracao: novo.estado === "Exonerado" ? (novo.data_exoneracao || null) : null,
+        motivo_exoneracao: novo.estado === "Exonerado" ? (novo.motivo_exoneracao || "") : "",
         origem: "manual",
         criado_por: user?.id || null,
       })
@@ -2275,7 +2285,7 @@ function ModuloEfetivoPSA({ perfil, user, copy, onClose }) {
       return;
     }
 
-    setNovo({ nome: "", nim: "", posto: "", email: "", estado: "Ativo", data_inicio_psa: "", especialidades: [], observacoes: "" });
+    setNovo({ nome: "", nim: "", posto: "", email: "", estado: "Ativo", data_inicio_psa: "", especialidades: [], observacoes: "", data_exoneracao: "", motivo_exoneracao: "" });
     await carregarEfetivo();
     setSelecionadoKey(`manual-${data.id}`);
   }
@@ -2352,7 +2362,9 @@ Posto: ${m.posto || "[sem posto]"}
 Email: ${m.email || "[sem email]"}
 Estado: ${m.estado || "Ativo"}
 Data de início na PSA: ${m.data_inicio_psa || "[não indicada]"}
-Origem: ${m.temConta ? "Conta do sistema" : "Adicionado manualmente"}
+${m.estado === "Exonerado" ? `Data de exoneração: ${m.data_exoneracao || "[não indicada]"}
+Motivo de exoneração: ${m.motivo_exoneracao || "[não indicado]"}
+` : ""}Origem: ${m.temConta ? "Conta do sistema" : "Adicionado manualmente"}
 
 Especialidades:
 ${m.especialidades?.length ? m.especialidades.map((e) => `✓ ${e}`).join("\n") : "[sem especialidades registadas]"}
@@ -2379,11 +2391,12 @@ ${m.observacoes || "[sem observações]"}`;
 
       {erro && <div className="rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 px-4 py-3 text-sm">{erro}</div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
         <Kpi icon={<Shield />} label="Total efetivo" value={estatisticas.total} />
         <Kpi icon={<Star />} label="Ativos" value={estatisticas.ativos} />
         <Kpi icon={<FileText />} label="Inativos" value={estatisticas.inativos} />
         <Kpi icon={<Zap />} label="Suspensos" value={estatisticas.suspensos} />
+        <Kpi icon={<Trash2 />} label="Exonerados" value={estatisticas.exonerados} />
         <Kpi icon={<Calculator />} label="Ausentes" value={estatisticas.ausentes} />
       </div>
 
@@ -2410,6 +2423,12 @@ ${m.observacoes || "[sem observações]"}`;
             <Field label="Data de início na PSA" value={novo.data_inicio_psa} onChange={(v) => setNovo({ ...novo, data_inicio_psa: v })} />
             <SelectField label="Estado" value={novo.estado} onChange={(v) => setNovo({ ...novo, estado: v })} options={ESTADOS_EFETIVO} />
           </div>
+          {novo.estado === "Exonerado" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 p-3">
+              <Field label="Data de exoneração" value={novo.data_exoneracao} onChange={(v) => setNovo({ ...novo, data_exoneracao: v })} />
+              <TextArea label="Motivo de exoneração" value={novo.motivo_exoneracao} onChange={(v) => setNovo({ ...novo, motivo_exoneracao: v })} placeholder="Ex: exoneração a pedido, expulsão por decisão do Comando, inatividade prolongada..." rows={2} />
+            </div>
+          )}
           <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
             <div className="font-black mb-2 text-[#d4af37]">Especialidades</div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -2431,7 +2450,7 @@ ${m.observacoes || "[sem observações]"}`;
         <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
           <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nome, NIM, posto, email ou especialidade..." className="w-full rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition" />
           <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="rounded-2xl bg-[#07110a]/90 border border-emerald-900/80 px-4 py-3 outline-none focus:border-[#d4af37] transition">
-            {["Todos", "Ativo", "Inativo", "Suspenso", "Ausentes"].map((op) => <option key={op}>{op}</option>)}
+            {["Todos", "Ativo", "Suspenso", "Inativo", "Exonerado", "Ausentes"].map((op) => <option key={op}>{op}</option>)}
           </select>
         </div>
       </div>
@@ -2489,6 +2508,13 @@ ${m.observacoes || "[sem observações]"}`;
                 <Field label="Data de início na PSA" value={selecionado.data_inicio_psa || ""} onChange={(v) => atualizarMilitar(selecionado, { data_inicio_psa: v || null })} />
                 <Field label="Email" value={selecionado.email || ""} onChange={(v) => atualizarMilitar(selecionado, { email: v || null })} />
               </div>
+
+              {selecionado.estado === "Exonerado" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 p-3">
+                  <Field label="Data de exoneração" value={selecionado.data_exoneracao || ""} onChange={(v) => atualizarMilitar(selecionado, { data_exoneracao: v || null })} />
+                  <TextArea label="Motivo de exoneração" value={selecionado.motivo_exoneracao || ""} onChange={(v) => atualizarMilitar(selecionado, { motivo_exoneracao: v })} placeholder="Ex: exoneração a pedido, expulsão por decisão do Comando, inatividade prolongada..." rows={2} />
+                </div>
+              )}
 
               <div className="rounded-2xl bg-black/20 border border-white/10 p-3">
                 <div className="font-black mb-3 text-[#d4af37]">Especialidades</div>
